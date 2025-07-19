@@ -118,11 +118,9 @@ export default function App() {
                         setUserId(user.uid);
                     } else {
                         try {
-                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                                await signInWithCustomToken(firebaseAuth, __initial_auth_token);
-                            } else {
-                                await signInAnonymously(firebaseAuth);
-                            }
+                            
+                            await signInAnonymously(firebaseAuth);
+                            
                         } catch (authError) {
                             console.error("Authentication error:", authError);
                             setError("Failed to authenticate. Please refresh the page.");
