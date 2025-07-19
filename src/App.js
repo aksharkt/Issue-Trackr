@@ -22,10 +22,18 @@ import {
 import { ArrowUpDown, PlusCircle, Search, Trash2, Edit, X, User, Clipboard, PieChart, List, FileDown, Sparkles, BrainCircuit, Users, Eye, Mail, Phone, Upload } from 'lucide-react';
 
 // --- Firebase Configuration ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-    ? JSON.parse(__firebase_config) 
-    : {};
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-issue-tracker';
+const firebaseConfig = {
+    apiKey: "AIzaSyDwfLf1G-3N_fXgXNNAKdhBYm9zTUOsjxA",
+    authDomain: "issue-trackr-98ebd.firebaseapp.com",
+    projectId: "issue-trackr-98ebd",
+    storageBucket: "issue-trackr-98ebd.appspot.com",
+    messagingSenderId: "778691816102",
+    appId: "1:778691816102:web:2ae1571d67c694a7242267",
+    measurementId: "G-EDL36NWN7R"
+  };
+  
+  // This line is important for the database path
+  const appId = firebaseConfig.projectId;
 
 // --- Main App Component ---
 export default function App() {
