@@ -118,9 +118,7 @@ export default function App() {
                         setUserId(user.uid);
                     } else {
                         try {
-                            
-                            await signInAnonymously(firebaseAuth);
-                            
+                            await signInAnonymously(firebaseAuth);    
                         } catch (authError) {
                             console.error("Authentication error:", authError);
                             setError("Failed to authenticate. Please refresh the page.");
