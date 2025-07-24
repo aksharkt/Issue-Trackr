@@ -597,7 +597,7 @@ const Header = ({ onNewTicket, user, auth, setView }) => {
     <header className="mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
             <div>
-                <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white tracking-tight">AI Issue Tracker</h1>
+                <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white tracking-tight">Issue Tracker</h1>
                 <p className="text-gray-600 dark:text-gray-400 mt-1">Your shared workspace for managing support tickets.</p>
             </div>
             <div className="flex items-center mt-4 sm:mt-0">
