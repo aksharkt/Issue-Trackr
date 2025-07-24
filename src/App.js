@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
-import { 
-    getAuth, 
+import {
+    getAuth,
     onAuthStateChanged,
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
@@ -15,13 +15,13 @@ import {
     updatePassword,
     sendPasswordResetEmail
 } from 'firebase/auth';
-import { 
-    getFirestore, 
-    collection, 
-    addDoc, 
-    onSnapshot, 
-    doc, 
-    updateDoc, 
+import {
+    getFirestore,
+    collection,
+    addDoc,
+    onSnapshot,
+    doc,
+    updateDoc,
     deleteDoc,
     query,
     serverTimestamp,
@@ -30,7 +30,7 @@ import {
     getDoc,
     setDoc
 } from 'firebase/firestore';
-import { 
+import {
     ArrowUpDown, PlusCircle, Search, Trash2, Edit, X, PieChart, List, FileDown, Users, Eye, Mail, Phone, Upload, LogOut, Lock, Sun, Moon, AlertTriangle, CheckCircle, Info, Clock, ArchiveRestore, UserCircle, MoreVertical, Ticket, FolderOpen, Hash
 } from 'lucide-react';
 
@@ -65,7 +65,8 @@ const ThemeProvider = ({ children }) => {
     return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;
 };
 
-// --- Helper UI Components (Defined Before Use) ---
+// --- START OF COMPONENT DEFINITIONS ---
+// All helper and UI components are defined here first.
 
 const LoadingSpinner = () => <div className="flex justify-center items-center py-20"><div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600"></div></div>;
 
@@ -80,380 +81,6 @@ const Toast = ({ type, message, onClose }) => {
     );
 };
 
-// --- Main App Component (Authentication Router) ---
-export default function App() {
-    return (
-        <ThemeProvider>
-            <AuthRouter />
-        </ThemeProvider>
-    );
-}
-
-const AuthRouter = () => {
-    const [user, setUser] = useState(null);
-    const [auth, setAuth] = useState(null);
-    const [db, setDb] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState(null);
-    
-    useEffect(() => {
-        try {
-            const app = initializeApp(firebaseConfig);
-            const firebaseAuth = getAuth(app);
-            const firestoreDb = getFirestore(app);
-            setAuth(firebaseAuth);
-            setDb(firestoreDb);
-            setLogLevel('error');
-
-            const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
-                if (user) {
-                    const userDocRef = doc(firestoreDb, `/artifacts/${appId}/public/data/users`, user.uid);
-                    const userDoc = await getDoc(userDocRef);
-                    setUser(userDoc.exists() ? { ...user, ...userDoc.data() } : { ...user, role: 'user', name: user.displayName || user.email });
-                } else {
-                    setUser(null);
-                }
-                setIsLoading(false);
-            });
-            return () => unsubscribe();
-        } catch (e) {
-            console.error("Firebase initialization error:", e);
-            setError("Could not connect to services.");
-            setIsLoading(false);
-        }
-    }, []);
-
-    if (isLoading) {
-        return <div className="flex justify-center items-center min-h-screen bg-slate-100 dark:bg-slate-900"><LoadingSpinner /></div>;
-    }
-
-    if (error) {
-        return <div className="flex justify-center items-center min-h-screen bg-slate-100 dark:bg-slate-900 p-4"><Toast type="error" message={error} /></div>
-    }
-
-    return user ? <IssueTrackerApp user={user} auth={auth} db={db} /> : <LoginScreen auth={auth} db={db} />;
-}
-
-
-// --- Login Screen Component ---
-const LoginScreen = ({ auth, db }) => {
-    const [isLoginView, setIsLoginView] = useState(true);
-    const [isForgotPassword, setIsForgotPassword] = useState(false);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [name, setName] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-
-    const handleAuthAction = async (e) => {
-        e.preventDefault(); setIsLoading(true); setError(''); setSuccess('');
-        try {
-            if (isLoginView) {
-                await signInWithEmailAndPassword(auth, email, password);
-            } else {
-                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                await updateProfile(userCredential.user, { displayName: name });
-                const userDocRef = doc(db, `/artifacts/${appId}/public/data/users`, userCredential.user.uid);
-                await setDoc(userDocRef, { role: 'user', email: userCredential.user.email, name: name, phone: '', employeeId: '' });
-            }
-        } catch (err) { setError(err.message.replace('Firebase: ', '')); } finally { setIsLoading(false); }
-    };
-    
-    const handlePasswordReset = async (e) => {
-        e.preventDefault(); setIsLoading(true); setError(''); setSuccess('');
-        try {
-            await sendPasswordResetEmail(auth, email);
-            setSuccess('Password reset email sent! Please check your inbox.');
-        } catch (err) { setError(err.message.replace('Firebase: ', '')); } finally { setIsLoading(false); }
-    };
-
-    const handleGoogleSignIn = async () => {
-        setIsLoading(true); setError(''); const provider = new GoogleAuthProvider();
-        try {
-            const result = await signInWithPopup(auth, provider);
-            const user = result.user;
-            const userDocRef = doc(db, `/artifacts/${appId}/public/data/users`, user.uid);
-            const userDoc = await getDoc(userDocRef);
-            if (!userDoc.exists()) {
-                await setDoc(userDocRef, { role: 'user', email: user.email, name: user.displayName, phone: '', employeeId: '' });
-            }
-        } catch (err) { setError(err.message.replace('Firebase: ', '')); } finally { setIsLoading(false); }
-    };
-
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-blue-100 dark:from-slate-900 dark:via-slate-800 dark:to-blue-900/20 flex flex-col justify-center items-center p-4">
-            <div className="max-w-md w-full bg-white dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl shadow-2xl shadow-blue-500/10 p-8">
-                <div className="text-center mb-8">
-                    <h1 className="text-5xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-500 pb-2">Issue Tracker</h1>
-                    <p className="text-slate-500 dark:text-slate-400 mt-2">
-                        {isForgotPassword ? 'Reset your password' : (isLoginView ? 'Welcome back!' : 'Create your account')}
-                    </p>
-                </div>
-                
-                {isForgotPassword ? (
-                     <form onSubmit={handlePasswordReset} className="space-y-6">
-                        <div>
-                            <label htmlFor="email" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Email address</label>
-                            <input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 block w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white transition"/>
-                        </div>
-                        {error && <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 p-3 rounded-md">{error}</p>}
-                        {success && <p className="text-sm text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400 p-3 rounded-md">{success}</p>}
-                        <div>
-                            <button type="submit" disabled={isLoading} className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-400 transition-all transform hover:scale-105">
-                                {isLoading ? 'Sending...' : 'Send Reset Email'}
-                            </button>
-                        </div>
-                        <p className="mt-6 text-center text-sm text-slate-600 dark:text-slate-400">
-                            <button type="button" onClick={() => setIsForgotPassword(false)} className="font-medium text-blue-600 hover:text-blue-500 transition">
-                                Back to Sign in
-                            </button>
-                        </p>
-                    </form>
-                ) : (
-                    <>
-                        <button type="button" onClick={handleGoogleSignIn} disabled={isLoading} className="w-full flex items-center justify-center py-2.5 px-4 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm text-sm font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all transform hover:scale-105">
-                            <svg className="w-5 h-5 mr-3" aria-hidden="true" viewBox="0 0 488 512"><path fill="currentColor" d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 126 21.2 177.2 56.5L357 154.4c-21.3-20.2-52.4-33.5-97.2-33.5-73 0-132.3 59.2-132.3 132.3s59.2 132.3 132.3 132.3c76.9 0 111.3-44.4 115.8-68.2H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z"></path></svg>
-                            Sign in with Google
-                        </button>
-
-                        <div className="my-6 flex items-center"><div className="flex-grow border-t border-slate-300 dark:border-slate-600"></div><span className="flex-shrink mx-4 text-slate-400 dark:text-slate-500 text-sm">OR</span><div className="flex-grow border-t border-slate-300 dark:border-slate-600"></div></div>
-
-                        <form onSubmit={handleAuthAction} className="space-y-6">
-                            {!isLoginView && (
-                                <div><label htmlFor="name" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Full Name</label><input id="name" type="text" required value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white transition"/></div>
-                            )}
-                            <div><label htmlFor="email" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Email address</label><input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 block w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white transition"/></div>
-                            <div><label htmlFor="password" className="block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label><input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 block w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 bg-white dark:bg-slate-700 dark:text-white transition"/></div>
-                            
-                            {isLoginView && <div className="text-sm"><button type="button" onClick={() => setIsForgotPassword(true)} className="font-medium text-blue-600 hover:text-blue-500 transition">Forgot your password?</button></div>}
-                            {error && <p className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400 p-3 rounded-md">{error}</p>}
-                            
-                            <div><button type="submit" disabled={isLoading} className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-400 transition-all transform hover:scale-105">{isLoading ? 'Processing...' : (isLoginView ? 'Sign In' : 'Sign Up')}</button></div>
-                        </form>
-                        <p className="mt-8 text-center text-sm text-slate-600 dark:text-slate-400">
-                            {isLoginView ? "Don't have an account?" : "Already have an account?"}
-                            <button onClick={() => { setIsLoginView(!isLoginView); setError(''); }} className="font-semibold text-blue-600 hover:text-blue-500 ml-1 transition">
-                                {isLoginView ? 'Sign up' : 'Sign in'}
-                            </button>
-                        </p>
-                    </>
-                )}
-            </div>
-        </div>
-    );
-};
-
-// --- Main Issue Tracker Application ---
-function IssueTrackerApp({ user, auth, db }) {
-    const [tickets, setTickets] = useState([]);
-    const [trashedTickets, setTrashedTickets] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [toast, setToast] = useState(null);
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-    const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-    const [ticketsToDelete, setTicketsToDelete] = useState([]);
-    const [isPermanentDelete, setIsPermanentDelete] = useState(false);
-    const [selectedTicket, setSelectedTicket] = useState(null);
-    const [selectedTickets, setSelectedTickets] = useState([]);
-    const [selectedTrashedTickets, setSelectedTrashedTickets] = useState([]);
-    const [view, setView] = useState('dashboard');
-    const [librariesLoaded, setLibrariesLoaded] = useState({ pdf: false, csv: false });
-    const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState('All');
-    const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'descending' });
-    
-    const showToast = (type, message) => { setToast({ type, message }); setTimeout(() => setToast(null), 4000); };
-
-    useEffect(() => {
-        const loadScript = (src, onDone, onError) => {
-            const script = document.createElement('script'); script.src = src; script.async = true; script.onload = onDone; script.onerror = onError; document.body.appendChild(script); return script;
-        };
-        const scriptErrorHandler = (name) => (e) => { console.error(`Failed to load ${name}.`, e); showToast("error", `Failed to load ${name} library.`); };
-        const jspdfScript = loadScript('https://unpkg.com/jspdf@latest/dist/jspdf.umd.min.js', () => { loadScript('https://unpkg.com/jspdf-autotable@3.5.23/dist/jspdf.plugin.autotable.js', () => setLibrariesLoaded(p => ({...p, pdf: true})), scriptErrorHandler('jsPDF-AutoTable')); }, scriptErrorHandler('jsPDF'));
-        const papaparseScript = loadScript('https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js', () => setLibrariesLoaded(p => ({...p, csv: true})), scriptErrorHandler('PapaParse'));
-        return () => { document.body.removeChild(jspdfScript); const at = document.querySelector('script[src*="autotable"]'); if(at) document.body.removeChild(at); document.body.removeChild(papaparseScript); };
-    }, []);
-
-    useEffect(() => {
-        if (!db) return;
-        setIsLoading(true);
-        const q = (path) => query(collection(db, path));
-        const safeDate = (v) => v?.toDate ? v.toDate() : null;
-
-        const unsubTickets = onSnapshot(q(`/artifacts/${appId}/public/data/tickets`), (snap) => {
-            setTickets(snap.docs.map(d => ({ id: d.id, ...d.data(), timestamp: safeDate(d.data().timestamp), issueStartTime: safeDate(d.data().issueStartTime), issueEndTime: safeDate(d.data().issueEndTime) })));
-            if(view !== 'trash') setIsLoading(false);
-        }, (err) => { console.error(err); showToast("error", "Failed to fetch tickets."); setIsLoading(false); });
-
-        const unsubTrash = onSnapshot(q(`/artifacts/${appId}/public/data/trash`), (snap) => {
-            setTrashedTickets(snap.docs.map(d => ({ id: d.id, ...d.data(), deletedAt: safeDate(d.data().deletedAt) })));
-            if(view === 'trash') setIsLoading(false);
-        }, (err) => { console.error(err); showToast("error", "Failed to fetch trashed tickets."); setIsLoading(false); });
-
-        return () => { unsubTickets(); unsubTrash(); };
-    }, [db, view]);
-
-    const filteredAndSortedTickets = useMemo(() => {
-        const source = view === 'trash' ? trashedTickets : tickets;
-        let processed = [...source];
-        if (searchTerm) {
-            const lowerSearch = searchTerm.toLowerCase();
-            processed = processed.filter(t => ['clientName', 'description', 'siteName', 'teamMember'].some(f => t[f]?.toLowerCase().includes(lowerSearch)));
-        }
-        if (view === 'list' && statusFilter !== 'All') {
-            processed = processed.filter(t => t.status === statusFilter);
-        }
-        if (sortConfig.key) {
-            processed.sort((a, b) => {
-                const aVal = a[sortConfig.key]; const bVal = b[sortConfig.key];
-                if (aVal === null || aVal === undefined) return 1; if (bVal === null || bVal === undefined) return -1;
-                if (aVal < bVal) return sortConfig.direction === 'ascending' ? -1 : 1;
-                if (aVal > bVal) return sortConfig.direction === 'ascending' ? 1 : -1;
-                return 0;
-            });
-        }
-        return processed;
-    }, [tickets, trashedTickets, searchTerm, statusFilter, sortConfig, view]);
-
-    const requestSort = (key) => {
-        let direction = 'ascending';
-        if (sortConfig.key === key && sortConfig.direction === 'ascending') direction = 'descending';
-        setSortConfig({ key, direction });
-    };
-
-    const openEditModal = (ticket = null) => { setSelectedTicket(ticket); setIsEditModalOpen(true); };
-    const closeEditModal = () => { setIsEditModalOpen(false); setSelectedTicket(null); };
-    const openDetailModal = (ticket) => { setSelectedTicket(ticket); setIsDetailModalOpen(true); };
-    const closeDetailModal = () => { setIsDetailModalOpen(false); setSelectedTicket(null); };
-    const openDeleteModal = (ids, isPerm) => { setTicketsToDelete(Array.isArray(ids) ? ids : [ids]); setIsPermanentDelete(isPerm); setIsDeleteModalOpen(true); };
-    const closeDeleteModal = () => { setIsDeleteModalOpen(false); setTicketsToDelete([]); };
-
-    const handleSelectTicket = (id) => {
-        const setter = view === 'trash' ? setSelectedTrashedTickets : setSelectedTickets;
-        setter(p => p.includes(id) ? p.filter(i => i !== id) : [...p, id]);
-    };
-    const handleSelectAllTickets = () => {
-        const setter = view === 'trash' ? setSelectedTrashedTickets : setSelectedTickets;
-        const selected = view === 'trash' ? selectedTrashedTickets : selectedTickets;
-        if (selected.length === filteredAndSortedTickets.length) setter([]);
-        else setter(filteredAndSortedTickets.map(t => t.id));
-    };
-
-    const handleSaveTicket = async (formData) => {
-        if (!db) return showToast("error", "Database not connected.");
-        
-        const dataToSave = {
-            ...formData,
-            issueStartTime: formData.issueStartTime ? new Date(formData.issueStartTime) : serverTimestamp(),
-            issueEndTime: formData.issueEndTime ? new Date(formData.issueEndTime) : null,
-        };
-        
-        if (dataToSave.status === 'Closed' && !dataToSave.issueEndTime) {
-            dataToSave.issueEndTime = serverTimestamp();
-            if (!dataToSave.closedByName) {
-                dataToSave.closedByName = user.name || user.email;
-                dataToSave.closedByUid = user.uid;
-            }
-        }
-
-        const path = `/artifacts/${appId}/public/data/tickets`;
-        try {
-            if (selectedTicket) {
-                const ref = doc(db, path, selectedTicket.id);
-                delete dataToSave.timestamp; 
-                await updateDoc(ref, dataToSave);
-                showToast("success", "Ticket updated successfully!");
-            } else {
-                await addDoc(collection(db, path), { ...dataToSave, timestamp: serverTimestamp(), authorId: user.uid, authorEmail: user.email });
-                showToast("success", "Ticket created successfully!");
-            }
-            closeEditModal();
-        } catch (e) { console.error(e); showToast("error", "Failed to save ticket."); }
-    };
-    
-    const handleCloseTicket = async (ticketId) => {
-        if (!db) return showToast("error", "Database not connected.");
-        const ticketRef = doc(db, `/artifacts/${appId}/public/data/tickets`, ticketId);
-        try {
-            await updateDoc(ticketRef, { status: 'Closed', issueEndTime: serverTimestamp(), closedByUid: user.uid, closedByName: user.name || user.email });
-            showToast("success", "Ticket closed successfully!");
-        } catch (e) { console.error(e); showToast("error", "Failed to close ticket."); }
-    };
-
-    const handleConfirmDelete = async (password) => {
-        if (user.role !== 'admin') return showToast("error", "Insufficient permissions.");
-        const credential = EmailAuthProvider.credential(user.email, password);
-        try {
-            await reauthenticateWithCredential(auth.currentUser, credential);
-            if (isPermanentDelete) await handlePermanentDelete(); else await handleSoftDelete();
-        } catch (e) { console.error(e); showToast("error", "Incorrect password. Deletion cancelled."); }
-    };
-
-    const handleSoftDelete = async () => {
-        const batch = writeBatch(db);
-        const ticketsPath = `/artifacts/${appId}/public/data/tickets`;
-        const trashPath = `/artifacts/${appId}/public/data/trash`;
-        ticketsToDelete.forEach(id => {
-            const ticket = tickets.find(t => t.id === id);
-            if (ticket) {
-                batch.set(doc(db, trashPath, id), { ...ticket, deletedAt: serverTimestamp() });
-                batch.delete(doc(db, ticketsPath, id));
-            }
-        });
-        try { await batch.commit(); showToast("info", `${ticketsToDelete.length} ticket(s) moved to trash.`); closeDeleteModal(); setSelectedTickets([]); }
-        catch (e) { console.error(e); showToast("error", "Failed to move tickets to trash."); }
-    };
-    
-    const handlePermanentDelete = async () => {
-        const batch = writeBatch(db);
-        const path = `/artifacts/${appId}/public/data/trash`;
-        ticketsToDelete.forEach(id => batch.delete(doc(db, path, id)));
-        try { await batch.commit(); showToast("success", `${ticketsToDelete.length} ticket(s) permanently deleted.`); closeDeleteModal(); setSelectedTrashedTickets([]); }
-        catch (e) { console.error(e); showToast("error", "Failed to permanently delete tickets."); }
-    };
-
-    const handleRestoreTicket = async (id) => {
-        const batch = writeBatch(db);
-        const ticket = trashedTickets.find(t => t.id === id);
-        if (ticket) {
-            const { deletedAt, ...restoredData } = ticket;
-            batch.set(doc(db, `/artifacts/${appId}/public/data/tickets`, id), restoredData);
-            batch.delete(doc(db, `/artifacts/${appId}/public/data/trash`, id));
-            try { await batch.commit(); showToast("success", "Ticket restored successfully."); }
-            catch (e) { console.error(e); showToast("error", "Failed to restore ticket."); }
-        }
-    };
-
-    return (
-        <div className="bg-slate-100 dark:bg-slate-900 min-h-screen text-slate-800 dark:text-slate-200">
-            <div className="container mx-auto p-4 sm:p-6 lg:p-8">
-                {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
-                <Header onNewTicket={() => openEditModal()} user={user} auth={auth} setView={setView} />
-                
-                <div className="bg-white dark:bg-slate-800/60 rounded-2xl shadow-lg shadow-slate-300/20 dark:shadow-black/20 mt-6 ring-1 ring-slate-200 dark:ring-slate-700/50">
-                    <Toolbar {...{ view, setView, tickets: filteredAndSortedTickets, librariesLoaded, user, showToast, onBulkDelete: () => openDeleteModal(selectedTickets, false), onBulkPermanentDelete: () => openDeleteModal(selectedTrashedTickets, true), selectedTickets: view === 'trash' ? selectedTrashedTickets : selectedTickets}} />
-                    {view !== 'dashboard' && view !== 'profile' && <FilterControls {...{searchTerm, setSearchTerm, statusFilter, setStatusFilter, view}} />}
-                    <main className="p-4 md:p-6">
-                        {isLoading ? <LoadingSpinner /> : (
-                            view === 'dashboard' ? <Dashboard tickets={tickets} /> :
-                            view === 'list' ? <TicketList {...{ tickets: filteredAndSortedTickets, user, onEdit: openEditModal, onDelete: (id) => openDeleteModal(id, false), onViewDetails: openDetailModal, requestSort, sortConfig, selectedTickets, onSelectTicket, onSelectAllTickets, onCloseTicket: handleCloseTicket }} /> :
-                            view === 'trash' ? <TrashList {...{ tickets: filteredAndSortedTickets, onRestore: handleRestoreTicket, onPermanentDelete: (id) => openDeleteModal(id, true), selectedTickets: selectedTrashedTickets, onSelectTicket, onSelectAllTickets}} /> :
-                            <ProfilePage {...{user, auth, db, showToast}} />
-                        )}
-                    </main>
-                </div>
-
-                {isEditModalOpen && <TicketForm {...{isOpen: isEditModalOpen, onClose: closeEditModal, onSave: handleSaveTicket, ticket: selectedTicket, user}} />}
-                {isDetailModalOpen && <TicketDetailModal {...{isOpen: isDetailModalOpen, onClose: closeDetailModal, ticket: selectedTicket}} />}
-                {isDeleteModalOpen && <DeleteConfirmationModal {...{isOpen: isDeleteModalOpen, onClose: closeDeleteModal, onConfirm: handleConfirmDelete, count: ticketsToDelete.length, isPermanent: isPermanentDelete}} />}
-            </div>
-        </div>
-    );
-}
-
-// --- UI Sub-components (Continue) ---
 const UserDropdown = ({ user, auth, setView }) => {
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef(null);
@@ -635,20 +262,6 @@ const ActionsMenu = ({ children }) => {
     );
 };
 
-const TicketList = ({ tickets, user, onEdit, onDelete, onViewDetails, requestSort, sortConfig, selectedTickets, onSelectTicket, onSelectAllTickets, onCloseTicket }) => {
-    if (tickets.length === 0) return <p className="text-center py-16 text-slate-500 dark:text-slate-400">No tickets found.</p>;
-    const getSortIndicator = (key) => { if (sortConfig.key !== key) return <ArrowUpDown className="w-4 h-4 inline-block ml-1 text-slate-400" />; return sortConfig.direction === 'ascending' ? '▲' : '▼'; };
-    return (<div className="overflow-x-auto"><table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700"><thead className="bg-slate-50 dark:bg-slate-700/50"><tr>{user.role === 'admin' && <th className="px-6 py-3 text-left"><input type="checkbox" className="rounded border-slate-300 dark:bg-slate-900 dark:border-slate-600 text-blue-600 focus:ring-blue-500/50" onChange={onSelectAllTickets} checked={tickets.length > 0 && selectedTickets.length === tickets.length} /></th>}
-        {['clientName', 'status', 'priority', 'timestamp', 'issueEndTime'].map(key => (
-            <th key={key} onClick={() => requestSort(key)} className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/50 transition-colors">
-                <span className="flex items-center">{key.replace('issueEndTime', 'Closed').replace('clientName', 'Ticket Details').replace('timestamp', 'Created')} {getSortIndicator(key)}</span>
-            </th>
-        ))}
-        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">Response Time</th>
-        <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">Actions</th>
-    </tr></thead><tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700/80">{tickets.map(ticket => <TicketRow key={ticket.id} {...{ ticket, user, onEdit, onDelete, onViewDetails, isSelected: selectedTickets.includes(ticket.id), onSelectTicket, onCloseTicket}} />)}</tbody></table></div>);
-};
-
 const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, onSelectTicket, onCloseTicket }) => {
     const canEdit = user.role === 'admin' || user.uid === ticket.authorId;
     const canDelete = user.role === 'admin';
@@ -682,7 +295,20 @@ const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, 
     </tr>);
 };
 
-// Helper to format a Date object into a `YYYY-MM-DDTHH:MM` string for datetime-local input
+const TicketList = ({ tickets, user, onEdit, onDelete, onViewDetails, requestSort, sortConfig, selectedTickets, onSelectTicket, onSelectAllTickets, onCloseTicket }) => {
+    if (tickets.length === 0) return <p className="text-center py-16 text-slate-500 dark:text-slate-400">No tickets found.</p>;
+    const getSortIndicator = (key) => { if (sortConfig.key !== key) return <ArrowUpDown className="w-4 h-4 inline-block ml-1 text-slate-400" />; return sortConfig.direction === 'ascending' ? '▲' : '▼'; };
+    return (<div className="overflow-x-auto"><table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700"><thead className="bg-slate-50 dark:bg-slate-700/50"><tr>{user.role === 'admin' && <th className="px-6 py-3 text-left"><input type="checkbox" className="rounded border-slate-300 dark:bg-slate-900 dark:border-slate-600 text-blue-600 focus:ring-blue-500/50" onChange={onSelectAllTickets} checked={tickets.length > 0 && selectedTickets.length === tickets.length} /></th>}
+        {['clientName', 'status', 'priority', 'timestamp', 'issueEndTime'].map(key => (
+            <th key={key} onClick={() => requestSort(key)} className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-600/50 transition-colors">
+                <span className="flex items-center">{key.replace('issueEndTime', 'Closed').replace('clientName', 'Ticket Details').replace('timestamp', 'Created')} {getSortIndicator(key)}</span>
+            </th>
+        ))}
+        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">Response Time</th>
+        <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 dark:text-slate-300 uppercase tracking-wider">Actions</th>
+    </tr></thead><tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700/80">{tickets.map(ticket => <TicketRow key={ticket.id} {...{ ticket, user, onEdit, onDelete, onViewDetails, isSelected: selectedTickets.includes(ticket.id), onSelectTicket, onCloseTicket}} />)}</tbody></table></div>);
+};
+
 const formatDateForInput = (date) => {
     if (!date) return "";
     const d = new Date(date);
