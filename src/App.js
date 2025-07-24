@@ -65,6 +65,21 @@ const ThemeProvider = ({ children }) => {
     return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;
 };
 
+// --- Helper UI Components (Defined Before Use) ---
+
+const LoadingSpinner = () => <div className="flex justify-center items-center py-20"><div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600"></div></div>;
+
+const Toast = ({ type, message, onClose }) => {
+    const icons = { success: CheckCircle, error: AlertTriangle, info: Info };
+    const colors = { success: 'bg-green-50 text-green-500 border-green-400 dark:bg-green-900/20', error: 'bg-red-50 text-red-500 border-red-400 dark:bg-red-900/20', info: 'bg-blue-50 text-blue-500 border-blue-400 dark:bg-blue-900/20' };
+    const Icon = icons[type];
+    return (
+        <div className={`fixed top-5 right-5 z-[100] max-w-sm w-full shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden ${colors[type]}`}>
+            <div className="p-4"><div className="flex items-start"><div className="flex-shrink-0"><Icon className={`w-6 h-6 ${colors[type].split(' ')[1]}`} /></div><div className="ml-3 w-0 flex-1 pt-0.5"><p className="text-sm font-medium text-slate-900 dark:text-white">{message}</p></div><div className="ml-4 flex-shrink-0 flex"><button onClick={onClose} className="inline-flex rounded-md text-slate-400 hover:text-slate-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"><X className="h-5 w-5" /></button></div></div></div>
+        </div>
+    );
+};
+
 // --- Main App Component (Authentication Router) ---
 export default function App() {
     return (
@@ -228,7 +243,6 @@ const LoginScreen = ({ auth, db }) => {
         </div>
     );
 };
-
 
 // --- Main Issue Tracker Application ---
 function IssueTrackerApp({ user, auth, db }) {
@@ -439,7 +453,7 @@ function IssueTrackerApp({ user, auth, db }) {
     );
 }
 
-// --- UI Sub-components ---
+// --- UI Sub-components (Continue) ---
 const UserDropdown = ({ user, auth, setView }) => {
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef(null);
@@ -789,18 +803,6 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                 <div className="bg-slate-50 dark:bg-slate-900/50 px-6 py-4 flex justify-end rounded-b-2xl"><button type="button" onClick={onClose} className="py-2 px-5 border border-transparent rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors">Close</button></div>
             </div>
              <style>{`@keyframes fade-in{from{opacity:0}to{opacity:1}} .animate-fade-in{animation:fade-in .3s ease-out forwards} @keyframes modal-pop{from{opacity:0;transform:scale(.95) translateY(20px)}to{opacity:1;transform:scale(1) translateY(0)}} .animate-modal-pop{animation:modal-pop .3s ease-out forwards}`}</style>
-        </div>
-    );
-};
-
-const LoadingSpinner = () => <div className="flex justify-center items-center py-20"><div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600"></div></div>;
-const Toast = ({ type, message, onClose }) => {
-    const icons = { success: CheckCircle, error: AlertTriangle, info: Info };
-    const colors = { success: 'bg-green-50 text-green-500 border-green-400 dark:bg-green-900/20', error: 'bg-red-50 text-red-500 border-red-400 dark:bg-red-900/20', info: 'bg-blue-50 text-blue-500 border-blue-400 dark:bg-blue-900/20' };
-    const Icon = icons[type];
-    return (
-        <div className={`fixed top-5 right-5 z-[100] max-w-sm w-full shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden ${colors[type]}`}>
-            <div className="p-4"><div className="flex items-start"><div className="flex-shrink-0"><Icon className={`w-6 h-6 ${colors[type].split(' ')[1]}`} /></div><div className="ml-3 w-0 flex-1 pt-0.5"><p className="text-sm font-medium text-slate-900 dark:text-white">{message}</p></div><div className="ml-4 flex-shrink-0 flex"><button onClick={onClose} className="inline-flex rounded-md text-slate-400 hover:text-slate-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"><X className="h-5 w-5" /></button></div></div></div>
         </div>
     );
 };
