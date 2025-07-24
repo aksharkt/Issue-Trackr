@@ -34,7 +34,7 @@ import {
     ArrowUpDown, PlusCircle, Search, Trash2, Edit, X, PieChart, List, FileDown, Users, Eye, Mail, Phone, Upload, LogOut, Lock, Sun, Moon, AlertTriangle, CheckCircle, Info, Clock, ArchiveRestore, UserCircle
 } from 'lucide-react';
 
-// --- Firebase Configuration ---
+// --- Firebase Configuration --- (No changes)
 const firebaseConfig = {
   apiKey: "AIzaSyDwfLf1G-3N_fXgXNNAKdhBYm9zTUOsjxA",
   authDomain: "issue-trackr-98ebd.firebaseapp.com",
@@ -46,7 +46,34 @@ const firebaseConfig = {
 };
 const appId = firebaseConfig.projectId;
 
-// --- Helper Functions and Components (Defined Before Use) ---
+// --- Helper Functions and Components ---
+
+const formatDuration = (start, end) => {
+    if (!start) return "Awaiting Start...";
+    const endTime = end || new Date(); 
+    const diffMs = new Date(endTime) - new Date(start);
+
+    if (diffMs < 0) return "—"; // Return a dash for invalid or future dates
+
+    let totalSeconds = Math.floor(diffMs / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    totalSeconds %= 86400;
+    const hours = Math.floor(totalSeconds / 3600);
+    totalSeconds %= 3600;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    parts.push(`${seconds}s`);
+    
+    if (end) return parts.join(' ');
+    if (!end && diffMs < 1000) return "Starting...";
+
+    return parts.join(' ');
+};
 
 const LoadingSpinner = () => <div className="flex justify-center items-center py-20"><div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600"></div></div>;
 
@@ -69,7 +96,7 @@ const Toast = ({ type, message, onClose }) => {
     );
 };
 
-// --- Theme Context for Dark/Light Mode ---
+// --- Theme Context for Dark/Light Mode --- (No changes)
 const ThemeContext = createContext();
 const useTheme = () => useContext(ThemeContext);
 
@@ -94,7 +121,7 @@ const ThemeProvider = ({ children }) => {
     );
 };
 
-// --- Main App Component (Authentication Router) ---
+// --- Main App Component (Authentication Router) --- (No changes)
 export default function App() {
     return (
         <ThemeProvider>
@@ -153,7 +180,7 @@ const AuthRouter = () => {
 }
 
 
-// --- Login Screen Component ---
+// --- Login Screen Component --- (No changes)
 const LoginScreen = ({ auth, db }) => {
     const [isLoginView, setIsLoginView] = useState(true);
     const [isForgotPassword, setIsForgotPassword] = useState(false);
@@ -231,7 +258,9 @@ const LoginScreen = ({ auth, db }) => {
         <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex flex-col justify-center items-center p-4">
             <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8">
                 <div className="text-center mb-8">
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Issue Tracker</h1>
+                    {/*--- FINAL CHANGE 3 START ---*/}
+                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">AGS Tracker</h1>
+                    {/*--- FINAL CHANGE 3 END ---*/}
                     <p className="text-gray-500 dark:text-gray-400 mt-2">
                         {isForgotPassword ? 'Reset your password' : (isLoginView ? 'Sign in to your account' : 'Create a new account')}
                     </p>
@@ -332,6 +361,22 @@ function IssueTrackerApp({ user, auth, db }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
     const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'descending' });
+    const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
+    const [ticketToClose, setTicketToClose] = useState(null);
+    const [clientFilter, setClientFilter] = useState('All');
+    const [siteFilter, setSiteFilter] = useState('All');
+
+    const clientOptions = useMemo(() => {
+        if (tickets.length === 0) return [];
+        const uniqueClients = [...new Set(tickets.map(t => t.clientName).filter(Boolean))];
+        return ['All', ...uniqueClients.sort()];
+    }, [tickets]);
+    
+    const siteOptions = useMemo(() => {
+        if (tickets.length === 0) return [];
+        const uniqueSites = [...new Set(tickets.map(t => t.siteName).filter(Boolean))];
+        return ['All', ...uniqueSites.sort()];
+    }, [tickets]);
     
     const showToast = (type, message) => {
         setToast({ type, message });
@@ -363,7 +408,14 @@ function IssueTrackerApp({ user, auth, db }) {
                 const ticketsData = snapshot.docs.map(doc => {
                     const data = doc.data();
                     const safeGetDate = (fieldValue) => fieldValue?.toDate ? fieldValue.toDate() : null;
-                    return { id: doc.id, ...data, timestamp: safeGetDate(data.timestamp), issueStartTime: safeGetDate(data.issueStartTime), issueEndTime: safeGetDate(data.issueEndTime) };
+                    return { 
+                        id: doc.id, 
+                        ...data, 
+                        timestamp: safeGetDate(data.timestamp), 
+                        issueStartTime: safeGetDate(data.issueStartTime), 
+                        issueEndTime: safeGetDate(data.issueEndTime),
+                        actualClosedAt: safeGetDate(data.actualClosedAt)
+                    };
                 });
                 setTickets(ticketsData);
                 if(view !== 'trash') setIsLoading(false);
@@ -390,11 +442,14 @@ function IssueTrackerApp({ user, auth, db }) {
             const searchLower = searchTerm.toLowerCase();
             const matchesSearch = ['clientName', 'description', 'siteName', 'teamMember'].some(field => ticket[field]?.toLowerCase().includes(searchLower));
             const matchesStatus = statusFilter === 'All' || ticket.status === statusFilter;
-            return matchesSearch && (view === 'trash' || matchesStatus);
+            const matchesClient = clientFilter === 'All' || ticket.clientName === clientFilter;
+            const matchesSite = siteFilter === 'All' || ticket.siteName === siteFilter;
+            return matchesSearch && matchesClient && matchesSite && (view === 'trash' || matchesStatus);
         });
         if (sortConfig.key) {
             processedTickets.sort((a, b) => {
-                const aValue = a[sortConfig.key]; const bValue = b[sortConfig.key];
+                const key = sortConfig.key;
+                const aValue = a[key]; const bValue = b[key];
                 if (aValue === null || aValue === undefined) return 1; if (bValue === null || bValue === undefined) return -1;
                 if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
                 if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
@@ -402,7 +457,7 @@ function IssueTrackerApp({ user, auth, db }) {
             });
         }
         return processedTickets;
-    }, [tickets, trashedTickets, searchTerm, statusFilter, sortConfig, view]);
+    }, [tickets, trashedTickets, searchTerm, statusFilter, clientFilter, siteFilter, sortConfig, view]);
 
     const requestSort = (key) => {
         let direction = 'ascending';
@@ -423,6 +478,9 @@ function IssueTrackerApp({ user, auth, db }) {
         setIsDeleteModalOpen(false);
         setTicketsToDelete([]);
     };
+    
+    const openCloseModal = (ticket) => { setTicketToClose(ticket); setIsCloseModalOpen(true); };
+    const closeCloseModal = () => { setIsCloseModalOpen(false); setTicketToClose(null); };
 
     const handleSelectTicket = (ticketId) => {
         const targetState = view === 'trash' ? setSelectedTrashedTickets : setSelectedTickets;
@@ -450,13 +508,21 @@ function IssueTrackerApp({ user, auth, db }) {
             issueEndTime: formData.issueEndTime ? new Date(formData.issueEndTime) : null,
         };
         
-        if (dataToSave.status === 'Closed' && !dataToSave.issueEndTime) {
-            dataToSave.issueEndTime = serverTimestamp();
+        // --- FINAL CHANGE 4 START ---
+        // If the ticket is being moved to "Closed", set the actual closing time.
+        if (dataToSave.status === 'Closed' && !selectedTicket?.actualClosedAt) {
+            dataToSave.actualClosedAt = serverTimestamp();
             if (!dataToSave.closedByName) {
                 dataToSave.closedByName = user.name || user.email;
                 dataToSave.closedByUid = user.uid;
             }
         }
+        
+        // If the ticket was previously "Closed" and is now being re-opened, reset the closing time.
+        if (selectedTicket?.status === 'Closed' && dataToSave.status !== 'Closed') {
+            dataToSave.actualClosedAt = null;
+        }
+        // --- FINAL CHANGE 4 END ---
 
         const path = `/artifacts/${appId}/public/data/tickets`;
         try {
@@ -464,22 +530,38 @@ function IssueTrackerApp({ user, auth, db }) {
                 const ref = doc(db, path, selectedTicket.id);
                 delete dataToSave.timestamp; 
                 await updateDoc(ref, dataToSave);
-                showToast("success", "Ticket updated successfully!");
+                showToast("success", "Issue updated successfully!");
             } else {
                 await addDoc(collection(db, path), { ...dataToSave, timestamp: serverTimestamp(), authorId: user.uid, authorEmail: user.email });
-                showToast("success", "Ticket created successfully!");
+                showToast("success", "Issue created successfully!");
             }
             closeEditModal();
-        } catch (e) { console.error(e); showToast("error", "Failed to save ticket."); }
+        } catch (e) { console.error(e); showToast("error", "Failed to save issue."); }
     };
-
-    const handleCloseTicket = async (ticketId) => {
-        if (!db) return showToast("error", "Database not connected.");
-        const ticketRef = doc(db, `/artifacts/${appId}/public/data/tickets`, ticketId);
+    
+    const handleConfirmClose = async (password) => {
+        if (!ticketToClose) return showToast("error", "No issue selected.");
+        
+        const credential = EmailAuthProvider.credential(auth.currentUser.email, password);
         try {
-            await updateDoc(ticketRef, { status: 'Closed', issueEndTime: serverTimestamp(), closedByUid: user.uid, closedByName: user.name || user.email });
-            showToast("success", "Ticket closed successfully!");
-        } catch (e) { console.error(e); showToast("error", "Failed to close ticket."); }
+            await reauthenticateWithCredential(auth.currentUser, credential);
+            
+            const ticketRef = doc(db, `/artifacts/${appId}/public/data/tickets`, ticketToClose.id);
+            await updateDoc(ticketRef, { 
+                status: 'Closed', 
+                actualClosedAt: serverTimestamp(), 
+                closedByUid: user.uid, 
+                closedByName: user.name || user.email 
+            });
+
+            showToast("success", `Issue #${ticketToClose.id.substring(0,5)}... closed successfully!`);
+            closeCloseModal();
+
+        } catch (error) {
+            console.error("Reauthentication/Closing failed:", error);
+            showToast("error", "Incorrect password. Issue was not closed.");
+            throw error;
+        }
     };
 
     const handleConfirmDelete = async (password) => {
@@ -515,12 +597,12 @@ function IssueTrackerApp({ user, auth, db }) {
 
         try {
             await batch.commit();
-            showToast("info", `${ticketsToDelete.length} ticket(s) moved to trash.`);
+            showToast("info", `${ticketsToDelete.length} issue(s) moved to trash.`);
             closeDeleteModal();
             setSelectedTickets([]);
         } catch (e) {
-            console.error("Error moving tickets to trash:", e);
-            showToast("error", "Failed to move tickets to trash.");
+            console.error("Error moving issues to trash:", e);
+            showToast("error", "Failed to move issues to trash.");
         }
     };
     
@@ -533,12 +615,12 @@ function IssueTrackerApp({ user, auth, db }) {
         });
         try {
             await batch.commit();
-            showToast("success", `${ticketsToDelete.length} ticket(s) permanently deleted.`);
+            showToast("success", `${ticketsToDelete.length} issue(s) permanently deleted.`);
             closeDeleteModal();
             setSelectedTrashedTickets([]);
         } catch (e) {
-            console.error("Error permanently deleting tickets:", e);
-            showToast("error", "Failed to permanently delete tickets.");
+            console.error("Error permanently deleting issues:", e);
+            showToast("error", "Failed to permanently delete issues.");
         }
     };
 
@@ -556,10 +638,10 @@ function IssueTrackerApp({ user, auth, db }) {
             batch.delete(trashDocRef);
             try {
                 await batch.commit();
-                showToast("success", "Ticket restored successfully.");
+                showToast("success", "Issue restored successfully.");
             } catch (e) {
-                console.error("Error restoring ticket:", e);
-                showToast("error", "Failed to restore ticket.");
+                console.error("Error restoring issue:", e);
+                showToast("error", "Failed to restore issue.");
             }
         }
     };
@@ -586,7 +668,15 @@ function IssueTrackerApp({ user, auth, db }) {
                         onBulkPermanentDelete={() => openDeleteModal(selectedTrashedTickets, true)}
                         showToast={showToast}
                     />
-                    {view !== 'dashboard' && view !== 'profile' && <FilterControls searchTerm={searchTerm} setSearchTerm={setSearchTerm} statusFilter={statusFilter} setStatusFilter={setStatusFilter} view={view} />}
+                    {view !== 'dashboard' && view !== 'profile' && 
+                        <FilterControls 
+                            searchTerm={searchTerm} setSearchTerm={setSearchTerm} 
+                            statusFilter={statusFilter} setStatusFilter={setStatusFilter} 
+                            clientFilter={clientFilter} setClientFilter={setClientFilter} clientOptions={clientOptions}
+                            siteFilter={siteFilter} setSiteFilter={setSiteFilter} siteOptions={siteOptions}
+                            view={view} 
+                        />
+                    }
                     <main className="p-4 md:p-6">
                         {isLoading ? <LoadingSpinner /> : (
                             view === 'dashboard' ? <Dashboard tickets={tickets} /> :
@@ -602,7 +692,7 @@ function IssueTrackerApp({ user, auth, db }) {
                                 selectedTickets={selectedTickets}
                                 onSelectTicket={handleSelectTicket}
                                 onSelectAllTickets={handleSelectAllTickets}
-                                onCloseTicket={handleCloseTicket}
+                                onCloseTicket={openCloseModal}
                             /> :
                             view === 'trash' ?
                             <TrashList 
@@ -621,6 +711,7 @@ function IssueTrackerApp({ user, auth, db }) {
                 {isEditModalOpen && <TicketForm isOpen={isEditModalOpen} onClose={closeEditModal} onSave={handleSaveTicket} ticket={selectedTicket} user={user} />}
                 {isDetailModalOpen && <TicketDetailModal isOpen={isDetailModalOpen} onClose={closeDetailModal} ticket={selectedTicket} />}
                 {isDeleteModalOpen && <DeleteConfirmationModal isOpen={isDeleteModalOpen} onClose={closeDeleteModal} onConfirm={handleConfirmDelete} count={ticketsToDelete.length} isPermanent={isPermanentDelete} />}
+                {isCloseModalOpen && <CloseConfirmationModal isOpen={isCloseModalOpen} onClose={closeCloseModal} onConfirm={handleConfirmClose} ticket={ticketToClose} />}
             </div>
         </div>
     );
@@ -633,8 +724,9 @@ const Header = ({ onNewTicket, user, auth, setView }) => {
     <header className="mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
             <div>
-                <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white tracking-tight">AI Issue Tracker</h1>
-                <p className="text-gray-600 dark:text-gray-400 mt-1">Your shared workspace for managing support tickets.</p>
+                 {/*--- FINAL CHANGE 3 START ---*/}
+                <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white tracking-tight">AGS Tracker</h1>
+                <p className="text-gray-600 dark:text-gray-400 mt-1">Your shared workspace for managing support issues.</p>
             </div>
             <div className="flex items-center mt-4 sm:mt-0">
                 <button onClick={toggleTheme} className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors mr-4" title="Toggle Theme">
@@ -646,8 +738,9 @@ const Header = ({ onNewTicket, user, auth, setView }) => {
                 </div>
                 <button onClick={() => signOut(auth)} className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors mr-4" title="Sign Out"><LogOut className="w-5 h-5 text-gray-600 dark:text-gray-300"/></button>
                 <button onClick={onNewTicket} className="flex items-center justify-center bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-all transform hover:scale-105">
-                    <PlusCircle className="w-5 h-5 mr-2" /> New Ticket
+                    <PlusCircle className="w-5 h-5 mr-2" /> New Issue
                 </button>
+                {/*--- FINAL CHANGE 3 END ---*/}
             </div>
         </div>
          <div className="mt-5 bg-purple-50 dark:bg-purple-900/20 border-l-4 border-purple-400 text-purple-900 dark:text-purple-300 p-3.5 rounded-r-lg flex items-center text-sm shadow-sm">
@@ -664,13 +757,13 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
     const exportToCSV = () => {
         if (!librariesLoaded.csv || !window.Papa) return showToast('error', 'CSV library not ready.');
         if (tickets.length === 0) return showToast('info', 'No data to export.');
-        const headers = ['Client Name', 'Site Name', 'Description', 'Status', 'Priority', 'Team Member', 'Created Date', 'Closed Date', 'Closed By', 'POS Ticket', 'Sungrow Ticket'];
-        const data = tickets.map(t => ({ 'Client Name': t.clientName, 'Site Name': t.siteName, 'Description': t.description, 'Status': t.status, 'Priority': t.priority, 'Team Member': t.teamMember, 'Created Date': t.timestamp?.toLocaleString() || 'N/A', 'Closed Date': t.issueEndTime?.toLocaleString() || 'N/A', 'Closed By': t.closedByName || '', 'POS Ticket': t.pcsTicket || '', 'Sungrow Ticket': t.sungrowTicket || '' }));
+        const headers = ['Client Name', 'Site Name', 'Description', 'Status', 'Priority', 'Team Member', 'Issue Start Time', 'Issue End Time', 'Closed By', 'POS Ticket', 'Sungrow Ticket'];
+        const data = tickets.map(t => ({ 'Client Name': t.clientName, 'Site Name': t.siteName, 'Description': t.description, 'Status': t.status, 'Priority': t.priority, 'Team Member': t.teamMember, 'Issue Start Time': t.issueStartTime?.toLocaleString() || 'N/A', 'Issue End Time': t.issueEndTime?.toLocaleString() || 'N/A', 'Closed By': t.closedByName || '', 'POS Ticket': t.pcsTicket || '', 'Sungrow Ticket': t.sungrowTicket || '' }));
         const csv = window.Papa.unparse({ fields: headers, data });
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
-        link.setAttribute("download", `tickets-export-${new Date().toISOString().split('T')[0]}.csv`);
+        link.setAttribute("download", `issues-export-${new Date().toISOString().split('T')[0]}.csv`);
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
         showToast('success', 'CSV export started.');
     };
@@ -681,12 +774,12 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
         doc.autoTable({
-            head: [['Client', 'Site', 'Description', 'Status', 'Priority', 'Created']],
-            body: tickets.map(t => [ t.clientName, t.siteName, t.description.substring(0, 40) + '...', t.status, t.priority, t.timestamp?.toLocaleDateString() || 'N/A' ]),
+            head: [['Client', 'Site', 'Description', 'Status', 'Priority', 'Issue Start']],
+            body: tickets.map(t => [ t.clientName, t.siteName, t.description.substring(0, 40) + '...', t.status, t.priority, t.issueStartTime?.toLocaleDateString() || 'N/A' ]),
             startY: 20,
         });
-        doc.text("Issue Tracker Tickets", 14, 15);
-        doc.save(`tickets-export-${new Date().toISOString().split('T')[0]}.pdf`);
+        doc.text("AGS Tracker Issues", 14, 15);
+        doc.save(`issues-export-${new Date().toISOString().split('T')[0]}.pdf`);
         showToast('success', 'PDF export started.');
     };
     
@@ -697,7 +790,7 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
         <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-center bg-gray-50/50 dark:bg-gray-800/20 rounded-t-xl">
             <div className="flex items-center space-x-1 bg-gray-200 dark:bg-gray-700 p-1 rounded-lg mb-3 sm:mb-0">
                 <button onClick={() => setView('dashboard')} className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${view === 'dashboard' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-600/50'}`}><PieChart className="w-4 h-4 inline-block mr-2"/>Dashboard</button>
-                <button onClick={() => setView('list')} className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${view === 'list' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-600/50'}`}><List className="w-4 h-4 inline-block mr-2"/>Ticket List</button>
+                <button onClick={() => setView('list')} className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${view === 'list' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-600/50'}`}><List className="w-4 h-4 inline-block mr-2"/>Issue List</button>
                 {user.role === 'admin' && <button onClick={() => setView('trash')} className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${view === 'trash' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-600/50'}`}><Trash2 className="w-4 h-4 inline-block mr-2"/>Trash</button>}
             </div>
             <div className="flex items-center space-x-3">
@@ -720,10 +813,15 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
     );
 };
 
-const FilterControls = ({ searchTerm, setSearchTerm, statusFilter, setStatusFilter, view }) => (
-    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-gray-200 dark:border-gray-700">
-        <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" /><input type="text" placeholder="Search tickets..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
-        {view === 'list' && <div><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option value="All">All Statuses</option><option>Open</option><option>In Progress</option><option>Closed</option></select></div>}
+const FilterControls = ({ searchTerm, setSearchTerm, statusFilter, setStatusFilter, clientFilter, setClientFilter, clientOptions, siteFilter, setSiteFilter, siteOptions, view }) => (
+    <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4 border-b border-gray-200 dark:border-gray-700">
+        <div className="relative md:col-span-2"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" /><input type="text" placeholder="Search issues..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
+        {view === 'list' && (
+            <>
+                <div><select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option value="All">All Clients</option>{clientOptions.slice(1).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                <div><select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)} className="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option value="All">All Sites</option>{siteOptions.slice(1).map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+            </>
+        )}
     </div>
 );
 const Dashboard = ({ tickets }) => {
@@ -738,8 +836,8 @@ const Dashboard = ({ tickets }) => {
     }, [tickets]);
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6"><StatCard title="Total Tickets" value={stats.total} /><StatCard title="Open Tickets" value={stats.open} /><StatCard title="Closed Tickets" value={stats.closed} /><StatCard title="Urgent Open" value={stats.highPriority} /></div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><ChartCard title="Tickets by Status" data={stats.byStatus} /><ChartCard title="Tickets by Priority" data={stats.byPriority} /></div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6"><StatCard title="Total Issues" value={stats.total} /><StatCard title="Open Issues" value={stats.open} /><StatCard title="Closed Issues" value={stats.closed} /><StatCard title="Urgent Open" value={stats.highPriority} /></div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><ChartCard title="Issues by Status" data={stats.byStatus} /><ChartCard title="Issues by Priority" data={stats.byPriority} /></div>
         </div>
     );
 };
@@ -752,29 +850,27 @@ const ChartCard = ({ title, data }) => {
 };
 
 const TicketList = ({ tickets, user, onEdit, onDelete, onViewDetails, requestSort, sortConfig, selectedTickets, onSelectTicket, onSelectAllTickets, onCloseTicket }) => {
-    if (tickets.length === 0) return <p className="text-center py-16 text-gray-500 dark:text-gray-400">No tickets found.</p>;
+    if (tickets.length === 0) return <p className="text-center py-16 text-gray-500 dark:text-gray-400">No issues found.</p>;
     const getSortIndicator = (key) => { if (sortConfig.key === key) return sortConfig.direction === 'ascending' ? '▲' : '▼'; return <ArrowUpDown className="w-4 h-4 inline-block ml-1 text-gray-400" />; };
-    return (<div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700"><thead className="bg-gray-50 dark:bg-gray-700"><tr>{user.role === 'admin' && <th className="px-6 py-3 text-left"><input type="checkbox" className="rounded dark:bg-gray-900 dark:border-gray-600" onChange={onSelectAllTickets} checked={tickets.length > 0 && selectedTickets.length === tickets.length} /></th>}<th onClick={() => requestSort('clientName')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Ticket Details {getSortIndicator('clientName')}</th><th onClick={() => requestSort('status')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Status {getSortIndicator('status')}</th><th onClick={() => requestSort('priority')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Priority {getSortIndicator('priority')}</th><th onClick={() => requestSort('timestamp')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Created {getSortIndicator('timestamp')}</th><th onClick={() => requestSort('issueEndTime')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Closed {getSortIndicator('issueEndTime')}</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Response Time</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th></tr></thead><tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">{tickets.map(ticket => <TicketRow key={ticket.id} ticket={ticket} user={user} onEdit={onEdit} onDelete={onDelete} onViewDetails={onViewDetails} isSelected={selectedTickets.includes(ticket.id)} onSelectTicket={onSelectTicket} onCloseTicket={onCloseTicket} />)}</tbody></table></div>);
+    return (<div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700"><thead className="bg-gray-50 dark:bg-gray-700"><tr>{user.role === 'admin' && <th className="px-6 py-3 text-left"><input type="checkbox" className="rounded dark:bg-gray-900 dark:border-gray-600" onChange={onSelectAllTickets} checked={tickets.length > 0 && selectedTickets.length === tickets.length} /></th>}<th onClick={() => requestSort('clientName')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Issue Details {getSortIndicator('clientName')}</th><th onClick={() => requestSort('status')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Status {getSortIndicator('status')}</th><th onClick={() => requestSort('priority')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Priority {getSortIndicator('priority')}</th>{/*--- FINAL CHANGE 2 START ---*/}<th onClick={() => requestSort('issueStartTime')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Issue Start Time {getSortIndicator('issueStartTime')}</th><th onClick={() => requestSort('issueEndTime')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Issue End Time {getSortIndicator('issueEndTime')}</th>{/*--- FINAL CHANGE 2 END ---*/}<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Response Time</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th></tr></thead><tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">{tickets.map(ticket => <TicketRow key={ticket.id} ticket={ticket} user={user} onEdit={onEdit} onDelete={onDelete} onViewDetails={onViewDetails} isSelected={selectedTickets.includes(ticket.id)} onSelectTicket={onSelectTicket} onCloseTicket={onCloseTicket} />)}</tbody></table></div>);
 };
 
 const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, onSelectTicket, onCloseTicket }) => {
     const canEdit = user.role === 'admin' || user.uid === ticket.authorId;
     const canDelete = user.role === 'admin';
-    const canClose = !canEdit && user.role !== 'admin' && ticket.status !== 'Closed';
+    const canClose = ticket.status !== 'Closed';
 
-    const calculateResponseTime = (start, end) => {
-        if (!end || !start) return "In Progress";
-        const diffMs = new Date(end) - new Date(start);
-        const days = Math.floor(diffMs / 86400000);
-        const hours = Math.floor((diffMs % 86400000) / 3600000);
-        const minutes = Math.floor(((diffMs % 86400000) % 3600000) / 60000);
-        if (days > 0) return `${days}d ${hours}h`;
-        if (hours > 0) return `${hours}h ${minutes}m`;
-        return `${minutes}m`;
+    const statusColor = { 
+        'Open': 'text-red-700 dark:text-red-400 font-semibold', 
+        'In Progress': 'text-blue-700 dark:text-blue-400', 
+        'Closed': 'text-green-700 dark:text-green-500 font-semibold' 
     };
-
-    const statusColor = { 'Open': 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300', 'In Progress': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300', 'Closed': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300' };
-    const priorityColor = { 'High': 'text-red-600 dark:text-red-400', 'Medium': 'text-yellow-600 dark:text-yellow-400', 'Low': 'text-green-600 dark:text-green-400' };
+    const priorityColor = { 
+        'Urgent': 'text-red-800 dark:text-red-500 font-bold',
+        'High': 'text-orange-600 dark:text-orange-400 font-semibold',
+        'Medium': 'text-yellow-800 dark:text-yellow-500',
+        'Low': 'text-green-700 dark:text-green-500'
+    };
     
     return (<tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
         {user.role === 'admin' && <td className="px-6 py-4"><input type="checkbox" className="rounded dark:bg-gray-900 dark:border-gray-600" checked={isSelected} onChange={() => onSelectTicket(ticket.id)} /></td>}
@@ -782,21 +878,22 @@ const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, 
             <div className="text-sm font-semibold text-gray-900 dark:text-white">{ticket.clientName}</div>
             <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{ticket.description}</p>
         </td>
-        <td className="px-6 py-4 whitespace-nowrap"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusColor[ticket.status] || 'bg-gray-100'}`}>{ticket.status}</span></td>
-        <td className="px-6 py-4 whitespace-nowrap"><span className={`font-semibold ${priorityColor[ticket.priority] || ''}`}>{ticket.priority}</span></td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ticket.timestamp ? new Date(ticket.timestamp).toLocaleString() : 'N/A'}</td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm"><span className={statusColor[ticket.status] || ''}>{ticket.status}</span></td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm"><span className={priorityColor[ticket.priority] || ''}>{ticket.priority}</span></td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ticket.issueStartTime ? new Date(ticket.issueStartTime).toLocaleString() : 'N/A'}</td>
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ticket.issueEndTime && ticket.status === 'Closed' ? new Date(ticket.issueEndTime).toLocaleString() : '—'}</td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{calculateResponseTime(ticket.issueStartTime, ticket.issueEndTime)}</td>
+        {/*--- FINAL CHANGE 1 START ---*/}
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{formatDuration(ticket.issueStartTime, ticket.issueEndTime)}</td>
+        {/*--- FINAL CHANGE 1 END ---*/}
         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
             <button onClick={() => onViewDetails(ticket)} className="text-gray-500 hover:text-blue-700 dark:hover:text-blue-400 mr-4 transition-colors" title="View Details"><Eye className="w-5 h-5"/></button>
-            {canEdit && <button onClick={() => onEdit(ticket)} className="text-indigo-600 hover:text-indigo-900 dark:hover:text-indigo-400 mr-4 transition-colors" title="Edit Ticket"><Edit className="w-5 h-5"/></button>}
-            {canClose && <button onClick={() => onCloseTicket(ticket.id)} className="text-green-600 hover:text-green-900 dark:hover:text-green-400 mr-4 transition-colors" title="Close Ticket"><CheckCircle className="w-5 h-5"/></button>}
-            {canDelete && <button onClick={() => onDelete(ticket.id)} className="text-red-600 hover:text-red-900 dark:hover:text-red-400 transition-colors" title="Delete Ticket"><Trash2 className="w-5 h-5"/></button>}
+            {canEdit && <button onClick={() => onEdit(ticket)} className="text-indigo-600 hover:text-indigo-900 dark:hover:text-indigo-400 mr-4 transition-colors" title="Edit Issue"><Edit className="w-5 h-5"/></button>}
+            {canClose && <button onClick={() => onCloseTicket(ticket)} className="text-green-600 hover:text-green-900 dark:hover:text-green-400 mr-4 transition-colors" title="Close Issue"><CheckCircle className="w-5 h-5"/></button>}
+            {canDelete && <button onClick={() => onDelete(ticket.id)} className="text-red-600 hover:text-red-900 dark:hover:text-red-400 transition-colors" title="Delete Issue"><Trash2 className="w-5 h-5"/></button>}
         </td>
     </tr>);
 };
 
-// Helper to format a Date object into a `YYYY-MM-DDTHH:MM` string for datetime-local input
 const formatDateForInput = (date) => {
     if (!date) return "";
     const d = new Date(date);
@@ -805,7 +902,7 @@ const formatDateForInput = (date) => {
 };
 
 const TicketForm = ({ isOpen, onClose, onSave, ticket, user }) => {
-    const initialState = { teamMember: user.name || user.email, siteName: 'Defford', inverter: '1', status: 'Open', description: '', updatedInTeams: 'No', fiixTicket: '', pcsTicket: '', sungrowTicket: '', emailed: 'No', additionalNotes: '', clientName: '', priority: 'Medium', issueStartTime: '', issueEndTime: '' };
+    const initialState = { teamMember: user.name || user.email, siteName: 'Defford', inverter: '1', status: 'Open', description: '', updatedInTeams: 'No', updatedViaEmail: 'No', fiixTicket: '', pcsTicket: '', sungrowTicket: '', emailed: 'No', additionalNotes: '', clientName: '', priority: 'Medium', issueStartTime: '', issueEndTime: '' };
     const [formData, setFormData] = useState(initialState);
     
     useEffect(() => {
@@ -830,7 +927,7 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user }) => {
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-full overflow-y-auto transform transition-all scale-95 opacity-0 animate-fade-in-up">
                 <form onSubmit={handleSubmit}>
                     <div className="p-6 sm:p-8">
-                        <div className="flex justify-between items-start"><h2 className="text-2xl font-bold text-gray-900 dark:text-white">{ticket ? 'Edit Ticket' : 'Create New Ticket'}</h2><button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X className="w-6 h-6" /></button></div>
+                        <div className="flex justify-between items-start"><h2 className="text-2xl font-bold text-gray-900 dark:text-white">{ticket ? 'Edit Issue' : 'Create New Issue'}</h2><button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X className="w-6 h-6" /></button></div>
                         <div className="mt-6 space-y-6">
                             <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-6 border p-4 rounded-lg dark:border-gray-700">
                                 <legend className="text-sm font-medium text-gray-600 dark:text-gray-400 px-2">Client Details</legend>
@@ -838,19 +935,19 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user }) => {
                                 <div><label htmlFor="siteName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Site Name</label><select name="siteName" value={formData.siteName} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Defford', 'Whirlbush', 'Cleve Hill'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
                             </fieldset>
                             
-                            <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-6 border p-4 rounded-lg dark:border-gray-700">
+                            <fieldset className="grid grid-cols-1 md:grid-cols-3 gap-6 border p-4 rounded-lg dark:border-gray-700">
                                 <legend className="text-sm font-medium text-gray-600 dark:text-gray-400 px-2">Issue Details</legend>
-                                <div className="md:col-span-2"><label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label><textarea name="description" rows="3" value={formData.description} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
+                                <div className="md:col-span-3"><label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label><textarea name="description" rows="3" value={formData.description} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
                                 
-                                <div><label htmlFor="issueStartTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Start Time</label><input type="datetime-local" name="issueStartTime" value={formData.issueStartTime} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
-                                <div><label htmlFor="issueEndTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue End Time</label><input type="datetime-local" name="issueEndTime" value={formData.issueEndTime} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
+                                <div><label htmlFor="issueStartTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Start Time (Manual)</label><input type="datetime-local" name="issueStartTime" value={formData.issueStartTime} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
+                                <div><label htmlFor="issueEndTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue End Time (Manual)</label><input type="datetime-local" name="issueEndTime" value={formData.issueEndTime} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
 
                                 <div><label htmlFor="teamMember" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Team Member</label><input type="text" name="teamMember" value={formData.teamMember} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm bg-gray-100 dark:bg-gray-600" readOnly /></div>
                                 <div><label htmlFor="priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Priority</label><select name="priority" value={formData.priority} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Low', 'Medium', 'High', 'Urgent'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
                                 
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className={`${ticket?.status === 'Closed' ? 'col-span-1' : 'col-span-2'}`}><label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label><select name="status" value={formData.status} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Open', 'In Progress', 'Closed'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                    {ticket?.status === 'Closed' && ( <div className="col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closed By</label><div className="mt-1 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 truncate" title={ticket.closedByName}>{ticket.closedByName || 'Creator'}</div></div> )}
+                                    <div className={`${ticket?.closedByName ? 'col-span-1' : 'col-span-2'}`}><label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label><select name="status" value={formData.status} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Open', 'In Progress', 'Closed'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                    {ticket?.closedByName && ( <div className="col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closed By</label><div className="mt-1 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 truncate" title={ticket.closedByName}>{ticket.closedByName}</div></div> )}
                                 </div>
                                 
                                 <div><label htmlFor="inverter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Inverter</label><select name="inverter" value={formData.inverter} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['1', '2A', '2B', '3A', '3C', '4', '5', '6', '7', '8', '9A', '9B'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
@@ -858,11 +955,14 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user }) => {
 
                                 <div><label htmlFor="fiixTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fix Ticket</label><input type="text" name="fiixTicket" value={formData.fiixTicket} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
                                 <div><label htmlFor="updatedInTeams" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated in Teams</label><select name="updatedInTeams" value={formData.updatedInTeams} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
-                                <div className="md:col-span-2"><label htmlFor="additionalNotes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Additional Notes</label><textarea name="additionalNotes" rows="3" value={formData.additionalNotes} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
+                                
+                                <div><label htmlFor="updatedViaEmail" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated Via Email</label><select name="updatedViaEmail" value={formData.updatedViaEmail} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
+
+                                <div className="md:col-span-3"><label htmlFor="additionalNotes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Additional Notes</label><textarea name="additionalNotes" rows="3" value={formData.additionalNotes} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
                             </fieldset>
                         </div>
                     </div>
-                    <div className="bg-gray-50 dark:bg-gray-900/50 px-6 py-4 flex justify-end space-x-3 rounded-b-xl"><button type="button" onClick={onClose} className="bg-white dark:bg-gray-700 py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Cancel</button><button type="submit" className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Save Ticket</button></div>
+                    <div className="bg-gray-50 dark:bg-gray-900/50 px-6 py-4 flex justify-end space-x-3 rounded-b-xl"><button type="button" onClick={onClose} className="bg-white dark:bg-gray-700 py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Cancel</button><button type="submit" className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Save Issue</button></div>
                 </form>
             </div>
             <style>{`@keyframes fade-in-up { from { opacity: 0; transform: scale(0.95) translateY(20px); } to { opacity: 1; transform: scale(1) translateY(0); } } .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }`}</style>
@@ -871,29 +971,21 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user }) => {
 };
 
 const LiveDuration = ({ startTime, endTime }) => {
-    const calculateDuration = (start, end) => {
-        if (!start || !end) return "In Progress";
-        const diff = new Date(end) - new Date(start);
-        if (diff < 0) return "Invalid";
-        const d = Math.floor(diff / 864e5);
-        const h = Math.floor((diff % 864e5) / 36e5);
-        const m = Math.floor((diff % 36e5) / 6e4);
-        return `${d > 0 ? `${d}d ` : ''}${h > 0 ? `${h}h ` : ''}${m}m`;
-    };
-    const [duration, setDuration] = useState(() => calculateDuration(startTime, endTime));
+    const [duration, setDuration] = useState(() => formatDuration(startTime, endTime));
     
     useEffect(() => {
         if (endTime) {
-            setDuration(calculateDuration(startTime, endTime));
+            setDuration(formatDuration(startTime, endTime));
             return;
         }
         const timer = setInterval(() => {
-            setDuration(calculateDuration(startTime, new Date()));
-        }, 60000); // Update every minute for live open tickets
+            setDuration(formatDuration(startTime, null));
+        }, 1000); 
+
         return () => clearInterval(timer);
     }, [startTime, endTime]);
 
-    return <span>{duration}</span>;
+    return <span className="font-mono text-base">{duration}</span>;
 };
 
 
@@ -904,7 +996,7 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 transition-opacity">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-full overflow-y-auto transform transition-all scale-95 opacity-0 animate-fade-in-up">
                 <div className="p-6 sm:p-8">
-                    <div className="flex justify-between items-start"><div><h2 className="text-2xl font-bold text-gray-900 dark:text-white">Ticket Details</h2><p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Ticket #{ticket.customTicketNumber || ticket.id}</p></div><button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X className="w-6 h-6" /></button></div>
+                    <div className="flex justify-between items-start"><div><h2 className="text-2xl font-bold text-gray-900 dark:text-white">Issue Details</h2><p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Issue ID: {ticket.id}</p></div><button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X className="w-6 h-6" /></button></div>
                     <div className="mt-6 space-y-6">
                         <div className="border-b dark:border-gray-700 pb-4"><h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">Issue Description</h3><p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{ticket.description}</p></div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -912,9 +1004,9 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                             <DetailItem label="Site Name" value={ticket.siteName} />
                             <DetailItem label="Status" value={ticket.status} />
                             <DetailItem label="Priority" value={ticket.priority} />
-                            <DetailItem label="Start Time" value={ticket.issueStartTime ? new Date(ticket.issueStartTime).toLocaleString() : 'N/A'} />
-                            <DetailItem label="End Time" value={ticket.issueEndTime ? new Date(ticket.issueEndTime).toLocaleString() : 'N/A'} />
-                            <DetailItem label="Duration"><LiveDuration startTime={ticket.issueStartTime} endTime={ticket.issueEndTime} /></DetailItem>
+                            <DetailItem label="Created On (System)" value={ticket.timestamp ? new Date(ticket.timestamp).toLocaleString() : 'N/A'} />
+                            <DetailItem label="Closed On (System)" value={ticket.actualClosedAt ? new Date(ticket.actualClosedAt).toLocaleString() : 'N/A'} />
+                            <DetailItem label="System Duration"><LiveDuration startTime={ticket.timestamp} endTime={ticket.actualClosedAt} /></DetailItem>
                             <DetailItem label="Inverter" value={ticket.inverter} />
                             {ticket.closedByName && <DetailItem label="Closed By" value={ticket.closedByName} />}
                             {ticket.pcsTicket && <DetailItem label="POS Ticket #" value={ticket.pcsTicket} />}
@@ -926,6 +1018,58 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                 <div className="bg-gray-50 dark:bg-gray-900/50 px-6 py-4 flex justify-end rounded-b-xl"><button type="button" onClick={onClose} className="bg-blue-600 text-white py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Close</button></div>
             </div>
             <style>{`@keyframes fade-in-up { from { opacity: 0; transform: scale(0.95) translateY(20px); } to { opacity: 1; transform: scale(1) translateY(0); } } .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }`}</style>
+        </div>
+    );
+};
+
+const CloseConfirmationModal = ({ isOpen, onClose, onConfirm, ticket }) => {
+    const [password, setPassword] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsLoading(true);
+        setError('');
+        try {
+            await onConfirm(password);
+        } catch (e) {
+            setError(e.message.includes('wrong-password') ? 'Incorrect password. Please try again.' : 'An error occurred.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 transition-opacity">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md transform transition-all scale-95 opacity-0 animate-fade-in-up">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <div className="text-center">
+                            <Lock className="mx-auto h-12 w-12 text-blue-500" />
+                            <h3 className="mt-2 text-lg font-medium text-gray-900 dark:text-white">Confirm Close Issue</h3>
+                            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                                You are about to close the issue for client: <span className="font-semibold">{ticket?.clientName}</span>.
+                            </p>
+                            <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">Please enter your password to confirm this action.</p>
+                        </div>
+                        <div className="mt-4">
+                            <label htmlFor="password-close" className="sr-only">Password</label>
+                            <input type="password" name="password" id="password-close" value={password} onChange={(e) => setPassword(e.target.value)} required className="block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" placeholder="Enter your password"/>
+                        </div>
+                        {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-900/50 px-6 py-3 flex justify-end space-x-3 rounded-b-xl">
+                        <button type="button" onClick={onClose} className="bg-white dark:bg-gray-700 py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600">Cancel</button>
+                        <button type="submit" disabled={isLoading} className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-300">
+                            {isLoading ? 'Closing...' : 'Confirm Close'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+             <style>{`@keyframes fade-in-up { from { opacity: 0; transform: scale(0.95) translateY(20px); } to { opacity: 1; transform: scale(1) translateY(0); } } .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }`}</style>
         </div>
     );
 };
@@ -959,7 +1103,7 @@ const DeleteConfirmationModal = ({ isOpen, onClose, onConfirm, count, isPermanen
                             <AlertTriangle className="mx-auto h-12 w-12 text-red-500" />
                             <h3 className="mt-2 text-lg font-medium text-gray-900 dark:text-white">Confirm Deletion</h3>
                             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                                You are about to {isPermanent ? 'permanently delete' : 'move to trash'} {count} ticket(s). 
+                                You are about to {isPermanent ? 'permanently delete' : 'move to trash'} {count} issue(s). 
                                 {isPermanent && <span className="font-bold"> This action cannot be undone.</span>}
                             </p>
                             <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">Please enter your password to confirm.</p>
@@ -985,7 +1129,7 @@ const DeleteConfirmationModal = ({ isOpen, onClose, onConfirm, count, isPermanen
 
 const TrashList = ({ tickets, onRestore, onPermanentDelete, selectedTickets, onSelectTicket, onSelectAllTickets }) => {
     if (tickets.length === 0) return <p className="text-center py-16 text-gray-500 dark:text-gray-400">The trash bin is empty.</p>;
-    return (<div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700"><thead className="bg-gray-50 dark:bg-gray-700"><tr><th className="px-6 py-3 text-left"><input type="checkbox" className="rounded dark:bg-gray-900 dark:border-gray-600" onChange={onSelectAllTickets} checked={tickets.length > 0 && selectedTickets.length === tickets.length} /></th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Ticket Details</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Deleted At</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th></tr></thead><tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">{tickets.map(ticket => <TrashRow key={ticket.id} ticket={ticket} onRestore={onRestore} onPermanentDelete={onPermanentDelete} isSelected={selectedTickets.includes(ticket.id)} onSelectTicket={onSelectTicket} />)}</tbody></table></div>);
+    return (<div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700"><thead className="bg-gray-50 dark:bg-gray-700"><tr><th className="px-6 py-3 text-left"><input type="checkbox" className="rounded dark:bg-gray-900 dark:border-gray-600" onChange={onSelectAllTickets} checked={tickets.length > 0 && selectedTickets.length === tickets.length} /></th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Issue Details</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Deleted At</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th></tr></thead><tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">{tickets.map(ticket => <TrashRow key={ticket.id} ticket={ticket} onRestore={onRestore} onPermanentDelete={onPermanentDelete} isSelected={selectedTickets.includes(ticket.id)} onSelectTicket={onSelectTicket} />)}</tbody></table></div>);
 };
 
 const TrashRow = ({ ticket, onRestore, onPermanentDelete, isSelected, onSelectTicket }) => (
