@@ -35,7 +35,6 @@ import {
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
-// IMPORTANT: Replace this with your own Firebase project configuration!
 const firebaseConfig = {
   apiKey: "AIzaSyDwfLf1G-3N_fXgXNNAKdhBYm9zTUOsjxA",
   authDomain: "issue-trackr-98ebd.firebaseapp.com",
@@ -47,28 +46,47 @@ const firebaseConfig = {
 };
 const appId = firebaseConfig.projectId;
 
+// --- Helper Functions and Components (Defined Before Use) ---
+
+const LoadingSpinner = () => <div className="flex justify-center items-center py-20"><div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600"></div></div>;
+
+const Toast = ({ type, message, onClose }) => {
+    const icons = { success: CheckCircle, error: AlertTriangle, info: Info };
+    const colors = { success: 'bg-green-50 dark:bg-green-900/20 border-green-400', error: 'bg-red-50 dark:bg-red-900/20 border-red-400', info: 'bg-blue-50 dark:bg-blue-900/20 border-blue-400' };
+    const Icon = icons[type];
+    return (
+        <div className={`fixed top-5 right-5 z-50 max-w-sm w-full shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden ${colors[type]}`}>
+            <div className="p-4">
+                <div className="flex items-start">
+                    <div className="flex-shrink-0"><Icon className={`w-5 h-5 ${type === 'success' ? 'text-green-500' : type === 'error' ? 'text-red-500' : 'text-blue-500'}`} /></div>
+                    <div className="ml-3 w-0 flex-1 pt-0.5"><p className="text-sm font-medium text-gray-900 dark:text-white">{message}</p></div>
+                    <div className="ml-4 flex-shrink-0 flex">
+                        <button onClick={onClose} className="inline-flex rounded-md text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"><span className="sr-only">Close</span><X className="h-5 w-5" /></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- Theme Context for Dark/Light Mode ---
 const ThemeContext = createContext();
 const useTheme = () => useContext(ThemeContext);
 
 const ThemeProvider = ({ children }) => {
     const [theme, setTheme] = useState('light');
-    
     useEffect(() => {
         const storedTheme = localStorage.getItem('theme') || 'light';
         setTheme(storedTheme);
     }, []);
-
     useEffect(() => {
         document.documentElement.classList.remove('light', 'dark');
         document.documentElement.classList.add(theme);
         localStorage.setItem('theme', theme);
     }, [theme]);
-
     const toggleTheme = () => {
         setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
     };
-
     return (
         <ThemeContext.Provider value={{ theme, toggleTheme }}>
             {children}
@@ -370,7 +388,7 @@ function IssueTrackerApp({ user, auth, db }) {
         let processedTickets = [...source];
         processedTickets = processedTickets.filter(ticket => {
             const searchLower = searchTerm.toLowerCase();
-            const matchesSearch = ['clientName', 'description', 'customTicketNumber', 'technicianName', 'teamMember'].some(field => ticket[field]?.toLowerCase().includes(searchLower));
+            const matchesSearch = ['clientName', 'description', 'siteName', 'teamMember'].some(field => ticket[field]?.toLowerCase().includes(searchLower));
             const matchesStatus = statusFilter === 'All' || ticket.status === statusFilter;
             return matchesSearch && (view === 'trash' || matchesStatus);
         });
@@ -423,28 +441,45 @@ function IssueTrackerApp({ user, auth, db }) {
         }
     };
 
-    const handleSaveTicket = async (ticketData) => {
-        if (!db) { showToast("error", "Database not connected."); return; }
-        const ticketsCollectionPath = `/artifacts/${appId}/public/data/tickets`;
+    const handleSaveTicket = async (formData) => {
+        if (!db) return showToast("error", "Database not connected.");
+        
+        const dataToSave = {
+            ...formData,
+            issueStartTime: formData.issueStartTime ? new Date(formData.issueStartTime) : serverTimestamp(),
+            issueEndTime: formData.issueEndTime ? new Date(formData.issueEndTime) : null,
+        };
+        
+        if (dataToSave.status === 'Closed' && !dataToSave.issueEndTime) {
+            dataToSave.issueEndTime = serverTimestamp();
+            if (!dataToSave.closedByName) {
+                dataToSave.closedByName = user.name || user.email;
+                dataToSave.closedByUid = user.uid;
+            }
+        }
+
+        const path = `/artifacts/${appId}/public/data/tickets`;
         try {
-            const dataToSave = { ...ticketData };
             if (selectedTicket) {
-                const ticketRef = doc(db, ticketsCollectionPath, selectedTicket.id);
-                if ((dataToSave.status === 'Closed' || dataToSave.status === 'Completed') && !selectedTicket.issueEndTime) {
-                    dataToSave.issueEndTime = serverTimestamp();
-                } else if (dataToSave.status === 'Open' || dataToSave.status === 'In Progress') {
-                    dataToSave.issueEndTime = null;
-                }
+                const ref = doc(db, path, selectedTicket.id);
                 delete dataToSave.timestamp; 
-                delete dataToSave.issueStartTime;
-                await updateDoc(ticketRef, dataToSave);
+                await updateDoc(ref, dataToSave);
                 showToast("success", "Ticket updated successfully!");
             } else {
-                await addDoc(collection(db, ticketsCollectionPath), { ...dataToSave, timestamp: serverTimestamp(), issueStartTime: serverTimestamp(), issueEndTime: null, authorId: user.uid, authorEmail: user.email });
+                await addDoc(collection(db, path), { ...dataToSave, timestamp: serverTimestamp(), authorId: user.uid, authorEmail: user.email });
                 showToast("success", "Ticket created successfully!");
             }
             closeEditModal();
-        } catch (e) { console.error("Error saving ticket:", e); showToast("error", "Failed to save ticket."); }
+        } catch (e) { console.error(e); showToast("error", "Failed to save ticket."); }
+    };
+
+    const handleCloseTicket = async (ticketId) => {
+        if (!db) return showToast("error", "Database not connected.");
+        const ticketRef = doc(db, `/artifacts/${appId}/public/data/tickets`, ticketId);
+        try {
+            await updateDoc(ticketRef, { status: 'Closed', issueEndTime: serverTimestamp(), closedByUid: user.uid, closedByName: user.name || user.email });
+            showToast("success", "Ticket closed successfully!");
+        } catch (e) { console.error(e); showToast("error", "Failed to close ticket."); }
     };
 
     const handleConfirmDelete = async (password) => {
@@ -567,6 +602,7 @@ function IssueTrackerApp({ user, auth, db }) {
                                 selectedTickets={selectedTickets}
                                 onSelectTicket={handleSelectTicket}
                                 onSelectAllTickets={handleSelectAllTickets}
+                                onCloseTicket={handleCloseTicket}
                             /> :
                             view === 'trash' ?
                             <TrashList 
@@ -626,70 +662,34 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
     const importInputRef = useRef(null);
     
     const exportToCSV = () => {
-        if (!librariesLoaded.csv) {
-            showToast('error', 'CSV library not loaded yet.');
-            return;
-        }
-        if (tickets.length === 0) {
-            showToast('info', 'There is no data to export.');
-            return;
-        }
-
-        const headers = ['Client Name', 'Description', 'Status', 'Priority', 'Team Member', 'Created Date', 'Closed Date'];
-        const data = tickets.map(t => ({
-            'Client Name': t.clientName,
-            'Description': t.description,
-            'Status': t.status,
-            'Priority': t.priority,
-            'Team Member': t.teamMember,
-            'Created Date': t.timestamp ? new Date(t.timestamp).toLocaleString() : 'N/A',
-            'Closed Date': t.issueEndTime ? new Date(t.issueEndTime).toLocaleString() : 'N/A'
-        }));
-
-        const csv = window.Papa.unparse({ fields: headers, data: data });
+        if (!librariesLoaded.csv || !window.Papa) return showToast('error', 'CSV library not ready.');
+        if (tickets.length === 0) return showToast('info', 'No data to export.');
+        const headers = ['Client Name', 'Site Name', 'Description', 'Status', 'Priority', 'Team Member', 'Created Date', 'Closed Date', 'Closed By', 'POS Ticket', 'Sungrow Ticket'];
+        const data = tickets.map(t => ({ 'Client Name': t.clientName, 'Site Name': t.siteName, 'Description': t.description, 'Status': t.status, 'Priority': t.priority, 'Team Member': t.teamMember, 'Created Date': t.timestamp?.toLocaleString() || 'N/A', 'Closed Date': t.issueEndTime?.toLocaleString() || 'N/A', 'Closed By': t.closedByName || '', 'POS Ticket': t.pcsTicket || '', 'Sungrow Ticket': t.sungrowTicket || '' }));
+        const csv = window.Papa.unparse({ fields: headers, data });
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", "tickets.csv");
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute("download", `tickets-export-${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
         showToast('success', 'CSV export started.');
     };
 
     const exportToPDF = () => {
-        if (!librariesLoaded.pdf) {
-            showToast('error', 'PDF library not loaded yet.');
-            return;
-        }
-         if (tickets.length === 0) {
-            showToast('info', 'There is no data to export.');
-            return;
-        }
-
-        const doc = new window.jspdf.jsPDF();
-        const tableColumn = ["Client", "Description", "Status", "Priority", "Created"];
-        const tableRows = [];
-
-        tickets.forEach(ticket => {
-            const ticketData = [
-                ticket.clientName,
-                ticket.description.substring(0, 40) + '...',
-                ticket.status,
-                ticket.priority,
-                ticket.timestamp ? new Date(ticket.timestamp).toLocaleDateString() : 'N/A'
-            ];
-            tableRows.push(ticketData);
+        if (!librariesLoaded.pdf || !window.jspdf) return showToast('error', 'PDF library not ready.');
+        if (tickets.length === 0) return showToast('info', 'No data to export.');
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.autoTable({
+            head: [['Client', 'Site', 'Description', 'Status', 'Priority', 'Created']],
+            body: tickets.map(t => [ t.clientName, t.siteName, t.description.substring(0, 40) + '...', t.status, t.priority, t.timestamp?.toLocaleDateString() || 'N/A' ]),
+            startY: 20,
         });
-
-        doc.autoTable(tableColumn, tableRows, { startY: 20 });
         doc.text("Issue Tracker Tickets", 14, 15);
-        doc.save("tickets.pdf");
+        doc.save(`tickets-export-${new Date().toISOString().split('T')[0]}.pdf`);
         showToast('success', 'PDF export started.');
     };
-
+    
     const handleImportClick = () => { importInputRef.current.click(); };
     const handleFileChange = (event) => { const file = event.target.files[0]; onImport(file); event.target.value = null; };
 
@@ -751,15 +751,16 @@ const ChartCard = ({ title, data }) => {
     return (<div className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200/80 dark:border-gray-700 shadow-sm"><h3 className="font-semibold text-gray-800 dark:text-white mb-4">{title}</h3><div className="space-y-3">{Object.entries(data).map(([key, value]) => (<div key={key}><div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-600 dark:text-gray-300">{key}</span><span className="text-gray-500 dark:text-gray-400">{value}</span></div><div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5"><div className={`${colors[key] || 'bg-gray-500'} h-2.5 rounded-full`} style={{ width: `${total > 0 ? (value / total) * 100 : 0}%` }}></div></div></div>))}</div></div>);
 };
 
-const TicketList = ({ tickets, user, onEdit, onDelete, onViewDetails, requestSort, sortConfig, selectedTickets, onSelectTicket, onSelectAllTickets }) => {
+const TicketList = ({ tickets, user, onEdit, onDelete, onViewDetails, requestSort, sortConfig, selectedTickets, onSelectTicket, onSelectAllTickets, onCloseTicket }) => {
     if (tickets.length === 0) return <p className="text-center py-16 text-gray-500 dark:text-gray-400">No tickets found.</p>;
     const getSortIndicator = (key) => { if (sortConfig.key === key) return sortConfig.direction === 'ascending' ? '▲' : '▼'; return <ArrowUpDown className="w-4 h-4 inline-block ml-1 text-gray-400" />; };
-    return (<div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700"><thead className="bg-gray-50 dark:bg-gray-700"><tr>{user.role === 'admin' && <th className="px-6 py-3 text-left"><input type="checkbox" className="rounded dark:bg-gray-900 dark:border-gray-600" onChange={onSelectAllTickets} checked={tickets.length > 0 && selectedTickets.length === tickets.length} /></th>}<th onClick={() => requestSort('clientName')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Ticket Details {getSortIndicator('clientName')}</th><th onClick={() => requestSort('status')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Status {getSortIndicator('status')}</th><th onClick={() => requestSort('priority')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Priority {getSortIndicator('priority')}</th><th onClick={() => requestSort('timestamp')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Created {getSortIndicator('timestamp')}</th><th onClick={() => requestSort('issueEndTime')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Closed {getSortIndicator('issueEndTime')}</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Response Time</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th></tr></thead><tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">{tickets.map(ticket => <TicketRow key={ticket.id} ticket={ticket} user={user} onEdit={onEdit} onDelete={onDelete} onViewDetails={onViewDetails} isSelected={selectedTickets.includes(ticket.id)} onSelectTicket={onSelectTicket} />)}</tbody></table></div>);
+    return (<div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700"><thead className="bg-gray-50 dark:bg-gray-700"><tr>{user.role === 'admin' && <th className="px-6 py-3 text-left"><input type="checkbox" className="rounded dark:bg-gray-900 dark:border-gray-600" onChange={onSelectAllTickets} checked={tickets.length > 0 && selectedTickets.length === tickets.length} /></th>}<th onClick={() => requestSort('clientName')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Ticket Details {getSortIndicator('clientName')}</th><th onClick={() => requestSort('status')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Status {getSortIndicator('status')}</th><th onClick={() => requestSort('priority')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Priority {getSortIndicator('priority')}</th><th onClick={() => requestSort('timestamp')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Created {getSortIndicator('timestamp')}</th><th onClick={() => requestSort('issueEndTime')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Closed {getSortIndicator('issueEndTime')}</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Response Time</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th></tr></thead><tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">{tickets.map(ticket => <TicketRow key={ticket.id} ticket={ticket} user={user} onEdit={onEdit} onDelete={onDelete} onViewDetails={onViewDetails} isSelected={selectedTickets.includes(ticket.id)} onSelectTicket={onSelectTicket} onCloseTicket={onCloseTicket} />)}</tbody></table></div>);
 };
 
-const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, onSelectTicket }) => {
+const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, onSelectTicket, onCloseTicket }) => {
     const canEdit = user.role === 'admin' || user.uid === ticket.authorId;
     const canDelete = user.role === 'admin';
+    const canClose = !canEdit && user.role !== 'admin' && ticket.status !== 'Closed';
 
     const calculateResponseTime = (start, end) => {
         if (!end || !start) return "In Progress";
@@ -767,11 +768,9 @@ const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, 
         const days = Math.floor(diffMs / 86400000);
         const hours = Math.floor((diffMs % 86400000) / 3600000);
         const minutes = Math.floor(((diffMs % 86400000) % 3600000) / 60000);
-        const seconds = Math.round((((diffMs % 86400000) % 3600000) % 60000) / 1000);
         if (days > 0) return `${days}d ${hours}h`;
         if (hours > 0) return `${hours}h ${minutes}m`;
-        if (minutes > 0) return `${minutes}m ${seconds}s`;
-        return `${seconds}s`;
+        return `${minutes}m`;
     };
 
     const statusColor = { 'Open': 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300', 'In Progress': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300', 'Closed': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300' };
@@ -782,7 +781,6 @@ const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, 
         <td className="px-6 py-4 max-w-sm">
             <div className="text-sm font-semibold text-gray-900 dark:text-white">{ticket.clientName}</div>
             <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{ticket.description}</p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Team Member: {ticket.teamMember || 'N/A'}</p>
         </td>
         <td className="px-6 py-4 whitespace-nowrap"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusColor[ticket.status] || 'bg-gray-100'}`}>{ticket.status}</span></td>
         <td className="px-6 py-4 whitespace-nowrap"><span className={`font-semibold ${priorityColor[ticket.priority] || ''}`}>{ticket.priority}</span></td>
@@ -790,34 +788,41 @@ const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, 
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ticket.issueEndTime && ticket.status === 'Closed' ? new Date(ticket.issueEndTime).toLocaleString() : '—'}</td>
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{calculateResponseTime(ticket.issueStartTime, ticket.issueEndTime)}</td>
         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-            <button onClick={() => onViewDetails(ticket)} className="text-gray-500 hover:text-blue-700 dark:hover:text-blue-400 mr-4 transition-colors"><Eye className="w-5 h-5"/></button>
-            {canEdit && <button onClick={() => onEdit(ticket)} className="text-indigo-600 hover:text-indigo-900 dark:hover:text-indigo-400 mr-4 transition-colors"><Edit className="w-5 h-5"/></button>}
-            {canDelete && <button onClick={() => onDelete(ticket.id)} className="text-red-600 hover:text-red-900 dark:hover:text-red-400 transition-colors"><Trash2 className="w-5 h-5"/></button>}
+            <button onClick={() => onViewDetails(ticket)} className="text-gray-500 hover:text-blue-700 dark:hover:text-blue-400 mr-4 transition-colors" title="View Details"><Eye className="w-5 h-5"/></button>
+            {canEdit && <button onClick={() => onEdit(ticket)} className="text-indigo-600 hover:text-indigo-900 dark:hover:text-indigo-400 mr-4 transition-colors" title="Edit Ticket"><Edit className="w-5 h-5"/></button>}
+            {canClose && <button onClick={() => onCloseTicket(ticket.id)} className="text-green-600 hover:text-green-900 dark:hover:text-green-400 mr-4 transition-colors" title="Close Ticket"><CheckCircle className="w-5 h-5"/></button>}
+            {canDelete && <button onClick={() => onDelete(ticket.id)} className="text-red-600 hover:text-red-900 dark:hover:text-red-400 transition-colors" title="Delete Ticket"><Trash2 className="w-5 h-5"/></button>}
         </td>
     </tr>);
 };
 
+// Helper to format a Date object into a `YYYY-MM-DDTHH:MM` string for datetime-local input
+const formatDateForInput = (date) => {
+    if (!date) return "";
+    const d = new Date(date);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+};
+
 const TicketForm = ({ isOpen, onClose, onSave, ticket, user }) => {
-    const initialState = { teamMember: user.name || user.email, inverter: '1', modules: '1', status: 'Open', description: '', updatedInTeams: '', fiixTicket: '', pcsTicket: '', emailed: 'No', additionalNotes: '', clientName: '', clientLocation: '', technicianName: '', technicianPhone: '', priority: 'Medium' };
+    const initialState = { teamMember: user.name || user.email, siteName: 'Defford', inverter: '1', status: 'Open', description: '', updatedInTeams: 'No', fiixTicket: '', pcsTicket: '', sungrowTicket: '', emailed: 'No', additionalNotes: '', clientName: '', priority: 'Medium', issueStartTime: '', issueEndTime: '' };
     const [formData, setFormData] = useState(initialState);
-
-    const inverterOptions = ['1', '2A', '2B', '3A', '3C', '4', '5', '6', '7', '8', '9A', '9B'];
-    const moduleOptions = ['1', '2', '3', '4', '5', '6'];
-    const statusOptions = ['Open', 'In Progress', 'Closed'];
-    const priorityOptions = ['Low', 'Medium', 'High', 'Urgent'];
-    const clientLocationOptions = ['Location A', 'Location B', 'Location C']; // Placeholder locations
-
+    
     useEffect(() => {
         if (ticket) {
-            setFormData({ ...initialState, ...ticket });
+            setFormData({ 
+                ...initialState, 
+                ...ticket,
+                issueStartTime: formatDateForInput(ticket.issueStartTime),
+                issueEndTime: formatDateForInput(ticket.issueEndTime),
+            });
         } else {
             setFormData(initialState);
         }
     }, [ticket, user]);
 
-    const handleChange = (e) => { const { name, value } = e.target; setFormData(prev => ({ ...prev, [name]: value })); };
+    const handleChange = (e) => setFormData(p => ({ ...p, [e.target.name]: e.target.value }));
     const handleSubmit = (e) => { e.preventDefault(); onSave(formData); };
-    
     if (!isOpen) return null;
 
     return (
@@ -827,20 +832,33 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user }) => {
                     <div className="p-6 sm:p-8">
                         <div className="flex justify-between items-start"><h2 className="text-2xl font-bold text-gray-900 dark:text-white">{ticket ? 'Edit Ticket' : 'Create New Ticket'}</h2><button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X className="w-6 h-6" /></button></div>
                         <div className="mt-6 space-y-6">
-                            <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-6 border p-4 rounded-lg dark:border-gray-700"><legend className="text-sm font-medium text-gray-600 dark:text-gray-400 px-2">Client Details</legend><div><label htmlFor="clientName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Client Name</label><input type="text" name="clientName" value={formData.clientName} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div><div><label htmlFor="clientLocation" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Client Location</label><select name="clientLocation" value={formData.clientLocation} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{clientLocationOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div></fieldset>
-                            <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-6 border p-4 rounded-lg dark:border-gray-700"><legend className="text-sm font-medium text-gray-600 dark:text-gray-400 px-2">Technician Details</legend><div><label htmlFor="technicianName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Technician Name</label><input type="text" name="technicianName" value={formData.technicianName} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div><div><label htmlFor="technicianPhone" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Technician Phone</label><input type="tel" name="technicianPhone" value={formData.technicianPhone} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div></fieldset>
-                            <fieldset className="grid grid-cols-1 md:grid-cols-4 gap-6 border p-4 rounded-lg dark:border-gray-700"><legend className="text-sm font-medium text-gray-600 dark:text-gray-400 px-2">Issue Details</legend>
-                                <div className="md:col-span-1"><label htmlFor="teamMember" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Team Member</label><input type="text" name="teamMember" value={formData.teamMember} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm bg-gray-100 dark:bg-gray-600" readOnly /></div>
-                                <div className="md:col-span-1"><label htmlFor="inverter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Inverter</label><select name="inverter" value={formData.inverter} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{inverterOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                <div className="md:col-span-1"><label htmlFor="modules" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Modules</label><select name="modules" value={formData.modules} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{moduleOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                <div className="md:col-span-1"><label htmlFor="priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Priority</label><select name="priority" value={formData.priority} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{priorityOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                <div className="md:col-span-4"><label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label><select name="status" value={formData.status} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{statusOptions.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                <div className="md:col-span-4"><label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label><textarea name="description" rows="3" value={formData.description} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
-                                <div><label htmlFor="updatedInTeams" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated in Teams</label><select name="updatedInTeams" value={formData.updatedInTeams} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
+                            <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-6 border p-4 rounded-lg dark:border-gray-700">
+                                <legend className="text-sm font-medium text-gray-600 dark:text-gray-400 px-2">Client Details</legend>
+                                <div><label htmlFor="clientName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Client Name</label><input type="text" name="clientName" value={formData.clientName} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
+                                <div><label htmlFor="siteName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Site Name</label><select name="siteName" value={formData.siteName} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Defford', 'Whirlbush', 'Cleve Hill'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                            </fieldset>
+                            
+                            <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-6 border p-4 rounded-lg dark:border-gray-700">
+                                <legend className="text-sm font-medium text-gray-600 dark:text-gray-400 px-2">Issue Details</legend>
+                                <div className="md:col-span-2"><label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label><textarea name="description" rows="3" value={formData.description} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
+                                
+                                <div><label htmlFor="issueStartTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Start Time</label><input type="datetime-local" name="issueStartTime" value={formData.issueStartTime} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
+                                <div><label htmlFor="issueEndTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue End Time</label><input type="datetime-local" name="issueEndTime" value={formData.issueEndTime} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
+
+                                <div><label htmlFor="teamMember" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Team Member</label><input type="text" name="teamMember" value={formData.teamMember} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm bg-gray-100 dark:bg-gray-600" readOnly /></div>
+                                <div><label htmlFor="priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Priority</label><select name="priority" value={formData.priority} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Low', 'Medium', 'High', 'Urgent'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className={`${ticket?.status === 'Closed' ? 'col-span-1' : 'col-span-2'}`}><label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label><select name="status" value={formData.status} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Open', 'In Progress', 'Closed'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                    {ticket?.status === 'Closed' && ( <div className="col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closed By</label><div className="mt-1 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 truncate" title={ticket.closedByName}>{ticket.closedByName || 'Creator'}</div></div> )}
+                                </div>
+                                
+                                <div><label htmlFor="inverter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Inverter</label><select name="inverter" value={formData.inverter} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['1', '2A', '2B', '3A', '3C', '4', '5', '6', '7', '8', '9A', '9B'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                {formData.siteName === 'Defford' ? ( <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> ) : ( <div><label htmlFor="sungrowTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sungrow Ticket</label><input type="text" name="sungrowTicket" value={formData.sungrowTicket} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> )}
+
                                 <div><label htmlFor="fiixTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fix Ticket</label><input type="text" name="fiixTicket" value={formData.fiixTicket} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
-                                <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
-                                <div><label htmlFor="emailed" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Emailed</label><select name="emailed" value={formData.emailed} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
-                                <div className="md:col-span-4"><label htmlFor="additionalNotes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Additional Notes</label><textarea name="additionalNotes" rows="3" value={formData.additionalNotes} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
+                                <div><label htmlFor="updatedInTeams" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated in Teams</label><select name="updatedInTeams" value={formData.updatedInTeams} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
+                                <div className="md:col-span-2"><label htmlFor="additionalNotes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Additional Notes</label><textarea name="additionalNotes" rows="3" value={formData.additionalNotes} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
                             </fieldset>
                         </div>
                     </div>
@@ -852,24 +870,36 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user }) => {
     );
 };
 
+const LiveDuration = ({ startTime, endTime }) => {
+    const calculateDuration = (start, end) => {
+        if (!start || !end) return "In Progress";
+        const diff = new Date(end) - new Date(start);
+        if (diff < 0) return "Invalid";
+        const d = Math.floor(diff / 864e5);
+        const h = Math.floor((diff % 864e5) / 36e5);
+        const m = Math.floor((diff % 36e5) / 6e4);
+        return `${d > 0 ? `${d}d ` : ''}${h > 0 ? `${h}h ` : ''}${m}m`;
+    };
+    const [duration, setDuration] = useState(() => calculateDuration(startTime, endTime));
+    
+    useEffect(() => {
+        if (endTime) {
+            setDuration(calculateDuration(startTime, endTime));
+            return;
+        }
+        const timer = setInterval(() => {
+            setDuration(calculateDuration(startTime, new Date()));
+        }, 60000); // Update every minute for live open tickets
+        return () => clearInterval(timer);
+    }, [startTime, endTime]);
+
+    return <span>{duration}</span>;
+};
+
+
 const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
     if (!isOpen) return null;
-    
-    const calculateResponseTime = (start, end) => {
-        if (!end || !start) return "In Progress";
-        const diffMs = new Date(end) - new Date(start);
-        const days = Math.floor(diffMs / 86400000);
-        const hours = Math.floor((diffMs % 86400000) / 3600000);
-        const minutes = Math.floor(((diffMs % 86400000) % 3600000) / 60000);
-        const seconds = Math.round((((diffMs % 86400000) % 3600000) % 60000) / 1000);
-        if (days > 0) return `${days}d ${hours}h`;
-        if (hours > 0) return `${hours}h ${minutes}m`;
-        if (minutes > 0) return `${minutes}m ${seconds}s`;
-        return `${seconds}s`;
-    };
-
     const DetailItem = ({ label, value, children }) => (<div><p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase tracking-wider">{label}</p><div className="text-gray-900 dark:text-white text-sm mt-1">{children || value || '—'}</div></div>);
-    
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 transition-opacity">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-full overflow-y-auto transform transition-all scale-95 opacity-0 animate-fade-in-up">
@@ -879,18 +909,16 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                         <div className="border-b dark:border-gray-700 pb-4"><h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">Issue Description</h3><p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{ticket.description}</p></div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <DetailItem label="Team Member" value={ticket.teamMember} />
-                            <DetailItem label="Inverter" value={ticket.inverter} />
-                            <DetailItem label="Modules" value={ticket.modules} />
-                            <DetailItem label="Status/Issue" value={ticket.status} />
+                            <DetailItem label="Site Name" value={ticket.siteName} />
+                            <DetailItem label="Status" value={ticket.status} />
+                            <DetailItem label="Priority" value={ticket.priority} />
                             <DetailItem label="Start Time" value={ticket.issueStartTime ? new Date(ticket.issueStartTime).toLocaleString() : 'N/A'} />
                             <DetailItem label="End Time" value={ticket.issueEndTime ? new Date(ticket.issueEndTime).toLocaleString() : 'N/A'} />
-                            <DetailItem label="Duration" value={calculateResponseTime(ticket.issueStartTime, ticket.issueEndTime)} />
-                        </div>
-                        <div className="border-t dark:border-gray-700 pt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-                           <DetailItem label="Updated in Teams" value={ticket.updatedInTeams} />
-                           <DetailItem label="Fix Ticket" value={ticket.fiixTicket} />
-                           <DetailItem label="POS Ticket" value={ticket.pcsTicket} />
-                           <DetailItem label="Emailed" value={ticket.emailed} />
+                            <DetailItem label="Duration"><LiveDuration startTime={ticket.issueStartTime} endTime={ticket.issueEndTime} /></DetailItem>
+                            <DetailItem label="Inverter" value={ticket.inverter} />
+                            {ticket.closedByName && <DetailItem label="Closed By" value={ticket.closedByName} />}
+                            {ticket.pcsTicket && <DetailItem label="POS Ticket #" value={ticket.pcsTicket} />}
+                            {ticket.sungrowTicket && <DetailItem label="Sungrow Ticket #" value={ticket.sungrowTicket} />}
                         </div>
                         {ticket.additionalNotes && <div className="border-t dark:border-gray-700 pt-4"><h4 className="text-md font-semibold text-gray-700 dark:text-gray-200 mb-2">Additional Notes</h4><p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap text-sm bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg">{ticket.additionalNotes}</p></div>}
                     </div>
@@ -898,38 +926,6 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                 <div className="bg-gray-50 dark:bg-gray-900/50 px-6 py-4 flex justify-end rounded-b-xl"><button type="button" onClick={onClose} className="bg-blue-600 text-white py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Close</button></div>
             </div>
             <style>{`@keyframes fade-in-up { from { opacity: 0; transform: scale(0.95) translateY(20px); } to { opacity: 1; transform: scale(1) translateY(0); } } .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }`}</style>
-        </div>
-    );
-};
-
-const LoadingSpinner = () => <div className="flex justify-center items-center py-20"><div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600"></div></div>;
-const Toast = ({ type, message, onClose }) => {
-    const icons = {
-        success: <CheckCircle className="w-5 h-5 text-green-500" />,
-        error: <AlertTriangle className="w-5 h-5 text-red-500" />,
-        info: <Info className="w-5 h-5 text-blue-500" />,
-    };
-    const colors = {
-        success: 'bg-green-50 dark:bg-green-900/20 border-green-400',
-        error: 'bg-red-50 dark:bg-red-900/20 border-red-400',
-        info: 'bg-blue-50 dark:bg-blue-900/20 border-blue-400',
-    };
-    return (
-        <div className={`fixed top-5 right-5 z-50 max-w-sm w-full shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden ${colors[type]}`}>
-            <div className="p-4">
-                <div className="flex items-start">
-                    <div className="flex-shrink-0">{icons[type]}</div>
-                    <div className="ml-3 w-0 flex-1 pt-0.5">
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">{message}</p>
-                    </div>
-                    <div className="ml-4 flex-shrink-0 flex">
-                        <button onClick={onClose} className="inline-flex rounded-md text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                            <span className="sr-only">Close</span>
-                            <X className="h-5 w-5" />
-                        </button>
-                    </div>
-                </div>
-            </div>
         </div>
     );
 };
