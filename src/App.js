@@ -922,7 +922,15 @@ const formatDateForInput = (date) => {
 const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
     const clientList = ['Metlen', 'Amresco', 'Puresky', 'Clean Leaf'];
     // --- Puresky-specific data ---
-    const pureskySites = Array.from({ length: 35 }, (_, i) => `Puresky Site ${i + 1}`);
+    // FINAL CHANGE: Replaced placeholder sites with the provided list.
+    const pureskySites = [
+        'Adirondack - Connecticut River', 'Blossom B - Hamilton Brook', 'Canandaigua', 'Cedar Hill Solar', 'Clayton',
+        'Clover Meadow', 'Cotuit', 'DeKalb I', 'DeKalb II', 'DeKalb III', 'Dover - Buckmaster Pond', 'Dudley Ground Mount (1-3)',
+        'East Brookfield Adams', 'Elmbrook Solar', 'Gouverneur I', 'Gouverneur II', 'Grand Island A', 'Greendale', 'Joe Jenny',
+        'Lake Waconia', 'Mendon Cape Road - Box Pond', 'New Germany', 'Oak Hill Solar 1', 'Oak Hill Solar 2', 'Quiet Meadows 1',
+        'Quiet Meadows 2', 'Tamarac', 'Three Rivers', 'Veseli', 'Volney', 'Wallum', 'Ware - Palmer Road', 'Westport A - Bass River',
+        'White River Solar', 'Zumbro'
+    ];
     const pureskyPvBess = ['PV', 'BESS', 'PV+BESS'];
     const pureskyEquipment = ['All', 'Combiner Box', 'DC-DC Converter', 'HVAC Alarm', 'Inverter', 'Power Manager', 'Recloser', 'String', 'Tracker', 'Weather Station', 'Whole Site'];
     const pureskyEquipmentNumbers = ['All', 'Multiple', ...Array.from({ length: 32 }, (_, i) => `${i + 1}`)];
@@ -1035,7 +1043,6 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
                                     {(formData.status === 'Closed' && ticket?.closedByName) && ( <div className="col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closed By</label><div className="mt-1 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 truncate" title={ticket.closedByName}>{ticket.closedByName}</div></div> )}
                                 </div>
                                 
-                                {/* --- MAJOR CHANGE 1: Conditional Fields --- */}
                                 {formData.clientName === 'Puresky' ? (
                                     <>
                                         <div><label htmlFor="pvBess" className="block text-sm font-medium text-gray-700 dark:text-gray-300">PV/BESS</label><select name="pvBess" value={formData.pvBess} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyPvBess.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
@@ -1154,7 +1161,6 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-4">
                             <DetailItem icon={Check} label="Updated in Teams" value={ticket.updatedInTeams} />
                             <DetailItem icon={Mail} label="Updated via Email" value={ticket.updatedViaEmail} />
-                            {/* --- MAJOR CHANGE 1: Conditional display for ticket details --- */}
                             {ticket.clientName === 'Puresky' ? (
                                 <>
                                     <DetailItem label="PV/BESS" value={ticket.pvBess} />
