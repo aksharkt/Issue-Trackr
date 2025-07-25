@@ -1165,7 +1165,7 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                                 <>
                                     <DetailItem label="PV/BESS" value={ticket.pvBess} />
                                     <DetailItem label="Equipment" value={ticket.equipment} />
-                                    <DetailItem label="Equipment #" value={ticket.equipmentNumber} />
+                                    <DetailItem label="Equipment Number" value={ticket.equipmentNumber} />
                                     <DetailItem label="Issue Type" value={ticket.issueType} />
                                 </>
                             ) : (
