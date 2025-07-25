@@ -343,7 +343,8 @@ const LoginScreen = ({ auth, db }) => {
 function IssueTrackerApp({ user, auth, db }) {
     const [tickets, setTickets] = useState([]);
     const [trashedTickets, setTrashedTickets] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    // FIX 2: Correctly manage loading state
+    const [dataLoaded, setDataLoaded] = useState({ tickets: false, trash: false });
     const [isUploading, setIsUploading] = useState(false);
     const [toast, setToast] = useState(null);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -363,6 +364,11 @@ function IssueTrackerApp({ user, auth, db }) {
     const [ticketToClose, setTicketToClose] = useState(null);
     const [clientFilter, setClientFilter] = useState('All');
     const [siteFilter, setSiteFilter] = useState('All');
+
+    // FIX 2: isLoading is now derived from whether the data for the current view has loaded.
+    const isLoading = (view === 'list' && !dataLoaded.tickets) || 
+                      (view === 'trash' && !dataLoaded.trash) ||
+                      (view === 'dashboard' && !dataLoaded.tickets);
 
     const clientOptions = useMemo(() => {
         if (tickets.length === 0) return [];
@@ -393,9 +399,9 @@ function IssueTrackerApp({ user, auth, db }) {
         return () => { document.body.removeChild(jspdfScript); const autotable = document.querySelector('script[src*="autotable"]'); if(autotable) document.body.removeChild(autotable); document.body.removeChild(papaparseScript); };
     }, []);
 
+    // FIX 2: This effect now runs only once and is not dependent on the `view`.
     useEffect(() => {
         if (db) {
-            setIsLoading(true);
             const ticketsCollectionPath = `/artifacts/${appId}/public/data/tickets`;
             const trashCollectionPath = `/artifacts/${appId}/public/data/trash`;
             
@@ -416,8 +422,8 @@ function IssueTrackerApp({ user, auth, db }) {
                     };
                 });
                 setTickets(ticketsData);
-                if(view !== 'trash') setIsLoading(false);
-            }, (err) => { console.error("Firestore snapshot error (tickets):", err); showToast("error", "Failed to fetch tickets."); setIsLoading(false); });
+                setDataLoaded(prev => ({...prev, tickets: true}));
+            }, (err) => { console.error("Firestore snapshot error (tickets):", err); showToast("error", "Failed to fetch tickets."); });
 
             const unsubTrash = onSnapshot(trashQuery, (snapshot) => {
                 const trashedData = snapshot.docs.map(doc => {
@@ -426,12 +432,18 @@ function IssueTrackerApp({ user, auth, db }) {
                     return { id: doc.id, ...data, deletedAt: safeGetDate(data.deletedAt) };
                 });
                 setTrashedTickets(trashedData);
-                 if(view === 'trash') setIsLoading(false);
-            }, (err) => { console.error("Firestore snapshot error (trash):", err); showToast("error", "Failed to fetch trashed tickets."); setIsLoading(false); });
+                setDataLoaded(prev => ({...prev, trash: true}));
+            }, (err) => { console.error("Firestore snapshot error (trash):", err); showToast("error", "Failed to fetch trashed tickets."); });
 
             return () => { unsubTickets(); unsubTrash(); };
         }
-    }, [db, view]);
+    }, [db]);
+
+    // FIX 4: Add an effect to clear selections when the view changes.
+    useEffect(() => {
+        setSelectedTickets([]);
+        setSelectedTrashedTickets([]);
+    }, [view]);
 
     const filteredAndSortedTickets = useMemo(() => {
         const source = view === 'trash' ? trashedTickets : tickets;
@@ -477,7 +489,6 @@ function IssueTrackerApp({ user, auth, db }) {
         setTicketsToDelete([]);
     };
     
-    // --- FINAL ENHANCEMENT 1 START ---
     const openCloseModal = (ticket) => { 
         if (!ticket.issueEndTime) {
             showToast('error', 'Please edit the issue and add a manual "Issue End Time" before closing.');
@@ -486,7 +497,6 @@ function IssueTrackerApp({ user, auth, db }) {
         setTicketToClose(ticket); 
         setIsCloseModalOpen(true); 
     };
-    // --- FINAL ENHANCEMENT 1 END ---
     const closeCloseModal = () => { setIsCloseModalOpen(false); setTicketToClose(null); };
 
     const handleSelectTicket = (ticketId) => {
@@ -497,12 +507,12 @@ function IssueTrackerApp({ user, auth, db }) {
     };
 
     const handleSelectAllTickets = () => {
-        const targetState = view === 'trash' ? setSelectedTrashedTickets : setSelectedTickets;
+        const targetStateSetter = view === 'trash' ? setSelectedTrashedTickets : setSelectedTickets;
         const selectedState = view === 'trash' ? selectedTrashedTickets : selectedTickets;
         if (selectedState.length === filteredAndSortedTickets.length) {
-            targetState([]);
+            targetStateSetter([]);
         } else {
-            targetState(filteredAndSortedTickets.map(t => t.id));
+            targetStateSetter(filteredAndSortedTickets.map(t => t.id));
         }
     };
 
@@ -649,7 +659,10 @@ function IssueTrackerApp({ user, auth, db }) {
         }
     };
 
-    const handleImport = (file) => { /* ... implementation ... */ };
+    // FIX 6: Handle CSV import by notifying the user it's not implemented yet.
+    const handleImport = (file) => {
+        showToast("info", "CSV import feature is not yet implemented.");
+    };
 
     return (
         <div className="bg-gray-100 dark:bg-gray-900 min-h-screen font-sans text-gray-800 dark:text-gray-200">
@@ -666,7 +679,9 @@ function IssueTrackerApp({ user, auth, db }) {
                         librariesLoaded={librariesLoaded} 
                         onImport={handleImport}
                         user={user}
-                        selectedTickets={view === 'trash' ? selectedTrashedTickets : selectedTickets}
+                        // FIX 3: Pass both selection states to the Toolbar
+                        selectedTickets={selectedTickets}
+                        selectedTrashedTickets={selectedTrashedTickets}
                         onBulkDelete={() => openDeleteModal(selectedTickets, false)}
                         onBulkPermanentDelete={() => openDeleteModal(selectedTrashedTickets, true)}
                         showToast={showToast}
@@ -746,13 +761,13 @@ const Header = ({ onNewTicket, user, auth, setView }) => {
         </div>
          <div className="mt-5 bg-purple-50 dark:bg-purple-900/20 border-l-4 border-purple-400 text-purple-900 dark:text-purple-300 p-3.5 rounded-r-lg flex items-center text-sm shadow-sm">
             <Lock className="w-6 h-6 mr-4 flex-shrink-0 text-purple-500" />
-            <p><span className="font-semibold">Action Required:</span> For login to work, enable 'Email/Password' in your Firebase Authentication settings.</p>
+            <p><span className="font-semibold">Security Notice:</span> For production use, ensure you have configured Firestore Security Rules on your Firebase backend to prevent unauthorized data access.</p>
         </div>
     </header>
 );
 };
 
-const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, selectedTickets, onBulkDelete, onBulkPermanentDelete, showToast }) => {
+const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, selectedTickets, selectedTrashedTickets, onBulkDelete, onBulkPermanentDelete, showToast }) => {
     const importInputRef = useRef(null);
     
     const exportToCSV = () => {
@@ -800,9 +815,10 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
                         <Trash2 className="w-4 h-4 mr-1.5"/>Delete Selected ({selectedTickets.length})
                     </button>
                 )}
-                 {user.role === 'admin' && selectedTickets.length > 0 && view === 'trash' && (
+                 {/* FIX 3: Correctly check selectedTrashedTickets for the trash view */}
+                 {user.role === 'admin' && selectedTrashedTickets.length > 0 && view === 'trash' && (
                     <button onClick={onBulkPermanentDelete} className="flex items-center text-sm font-medium text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 bg-red-100 dark:bg-red-900/20 px-3 py-1.5 rounded-lg transition-colors">
-                        <Trash2 className="w-4 h-4 mr-1.5"/>Delete Permanently ({selectedTickets.length})
+                        <Trash2 className="w-4 h-4 mr-1.5"/>Delete Permanently ({selectedTrashedTickets.length})
                     </button>
                 )}
                 <input type="file" ref={importInputRef} onChange={handleFileChange} accept=".csv" className="hidden" />
@@ -816,11 +832,21 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
 
 const FilterControls = ({ searchTerm, setSearchTerm, statusFilter, setStatusFilter, clientFilter, setClientFilter, clientOptions, siteFilter, setSiteFilter, siteOptions, view }) => (
     <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4 border-b border-gray-200 dark:border-gray-700">
-        <div className="relative md:col-span-2"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" /><input type="text" placeholder="Search issues..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
+        {/* FIX 1: The grid layout is adjusted to accommodate the new filter */}
+        <div className="relative md:col-span-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" /><input type="text" placeholder="Search issues..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
         {view === 'list' && (
             <>
                 <div><select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option value="All">All Clients</option>{clientOptions.slice(1).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                 <div><select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)} className="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option value="All">All Sites</option>{siteOptions.slice(1).map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                {/* FIX 1: Added the missing Status Filter dropdown */}
+                <div>
+                    <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white">
+                        <option value="All">All Statuses</option>
+                        <option value="Open">Open</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Closed">Closed</option>
+                    </select>
+                </div>
             </>
         )}
     </div>
@@ -923,6 +949,7 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
     const handleSubmit = (e) => { 
         e.preventDefault(); 
         
+        // FIX 5: Enforce that "Issue End Time" is required if status is "Closed".
         if (formData.status === 'Closed' && !formData.issueEndTime) {
             showToast('error', 'Please provide a manual "Issue End Time" before closing the issue.');
             return;
@@ -1004,7 +1031,6 @@ const LiveDuration = ({ startTime, endTime }) => {
 };
 
 
-// --- FINAL ENHANCEMENT 2 START ---
 const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
     if (!isOpen) return null;
 
@@ -1094,7 +1120,6 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
         </div>
     );
 };
-// --- FINAL ENHANCEMENT 2 END ---
 
 
 // --- Remaining components (CloseConfirmationModal, DeleteConfirmationModal, etc.) ---
