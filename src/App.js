@@ -529,7 +529,6 @@ function IssueTrackerApp({ user, auth, db }) {
             }
         }
         
-        // CHANGE 1: Clear "Closed By" info when a ticket is reopened.
         if (selectedTicket?.status === 'Closed' && dataToSave.status !== 'Closed') {
             dataToSave.actualClosedAt = null;
             dataToSave.closedByName = null;
@@ -921,9 +920,36 @@ const formatDateForInput = (date) => {
 };
 
 const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
-    // CHANGE 2: Removed "Cleve Hill" and "Whirlbush" from the client list.
     const clientList = ['Metlen', 'Amresco', 'Puresky', 'Clean Leaf'];
-    const initialState = { teamMember: user.name || user.email, siteName: 'Defford', status: 'Open', description: '', updatedInTeams: 'No', updatedViaEmail: 'No', fiixTicket: '', pcsTicket: '', sungrowTicket: '', emailed: 'No', additionalNotes: '', clientName: 'Metlen', priority: 'Medium', issueStartTime: '', issueEndTime: '' };
+    // --- Puresky-specific data ---
+    const pureskySites = Array.from({ length: 35 }, (_, i) => `Puresky Site ${i + 1}`);
+    const pureskyPvBess = ['PV', 'BESS', 'PV+BESS'];
+    const pureskyEquipment = ['All', 'Combiner Box', 'DC-DC Converter', 'HVAC Alarm', 'Inverter', 'Power Manager', 'Recloser', 'String', 'Tracker', 'Weather Station', 'Whole Site'];
+    const pureskyEquipmentNumbers = ['All', 'Multiple', ...Array.from({ length: 32 }, (_, i) => `${i + 1}`)];
+    const pureskyIssueTypes = ["Cannot confirm Production", "Communication Loss", "Production Impacting"];
+
+    const initialState = { 
+        teamMember: user.name || user.email, 
+        siteName: 'Defford', 
+        status: 'Open', 
+        description: '', 
+        updatedInTeams: 'No', 
+        updatedViaEmail: 'No', 
+        fiixTicket: '', 
+        pcsTicket: '', 
+        sungrowTicket: '', 
+        additionalNotes: '', 
+        clientName: 'Metlen', 
+        priority: 'Medium', 
+        issueStartTime: '', 
+        issueEndTime: '',
+        // Puresky fields
+        pvBess: 'PV',
+        equipment: 'All',
+        equipmentNumber: 'All',
+        issueType: 'Communication Loss',
+    };
+
     const [formData, setFormData] = useState(initialState);
     
     useEffect(() => {
@@ -938,6 +964,20 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
             setFormData(initialState);
         }
     }, [ticket, user]);
+
+    // Effect to handle changing form structure when client changes
+    useEffect(() => {
+        // If client is changed TO Puresky, reset site name
+        if (formData.clientName === 'Puresky') {
+            setFormData(p => ({ ...p, siteName: pureskySites[0] }));
+        } else {
+        // If client is changed FROM Puresky, reset to a default
+            if (!['Defford', 'Whirlbush', 'Cleve Hill'].includes(formData.siteName)) {
+                 setFormData(p => ({ ...p, siteName: 'Defford' }));
+            }
+        }
+    }, [formData.clientName]);
+
 
     const handleChange = (e) => setFormData(p => ({ ...p, [e.target.name]: e.target.value }));
     
@@ -969,7 +1009,15 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
                                         {clientList.map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                 </div>
-                                <div><label htmlFor="siteName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Site Name</label><select name="siteName" value={formData.siteName} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Defford', 'Whirlbush', 'Cleve Hill'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                <div>
+                                    <label htmlFor="siteName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Site Name</label>
+                                    <select name="siteName" value={formData.siteName} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">
+                                     {formData.clientName === 'Puresky' 
+                                        ? pureskySites.map(o => <option key={o} value={o}>{o}</option>)
+                                        : ['Defford', 'Whirlbush', 'Cleve Hill'].map(o => <option key={o} value={o}>{o}</option>)
+                                     }
+                                     </select>
+                                </div>
                             </fieldset>
                             
                             <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-6 border p-4 rounded-lg dark:border-gray-700">
@@ -984,17 +1032,26 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
                                 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className={`${(formData.status === 'Closed' && ticket?.closedByName) ? 'col-span-1' : 'col-span-2'}`}><label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label><select name="status" value={formData.status} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Open', 'In Progress', 'Closed'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                    {/* CHANGE 1: "Closed By" field now only shows if the status in the form is "Closed". */}
                                     {(formData.status === 'Closed' && ticket?.closedByName) && ( <div className="col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closed By</label><div className="mt-1 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 truncate" title={ticket.closedByName}>{ticket.closedByName}</div></div> )}
                                 </div>
                                 
-                                {formData.siteName === 'Defford' ? ( <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> ) : ( <div><label htmlFor="sungrowTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sungrow Ticket</label><input type="text" name="sungrowTicket" value={formData.sungrowTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> )}
-
-                                <div><label htmlFor="fiixTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fixx Ticket</label><input type="text" name="fiixTicket" value={formData.fiixTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
-                                <div><label htmlFor="updatedInTeams" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated in Teams</label><select name="updatedInTeams" value={formData.updatedInTeams} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
+                                {/* --- MAJOR CHANGE 1: Conditional Fields --- */}
+                                {formData.clientName === 'Puresky' ? (
+                                    <>
+                                        <div><label htmlFor="pvBess" className="block text-sm font-medium text-gray-700 dark:text-gray-300">PV/BESS</label><select name="pvBess" value={formData.pvBess} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyPvBess.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                        <div><label htmlFor="equipment" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment</label><select name="equipment" value={formData.equipment} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipment.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                        <div><label htmlFor="equipmentNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment Number</label><select name="equipmentNumber" value={formData.equipmentNumber} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipmentNumbers.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                        <div><label htmlFor="issueType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Type</label><select name="issueType" value={formData.issueType} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyIssueTypes.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                    </>
+                                ) : (
+                                    <>
+                                        {formData.siteName === 'Defford' ? ( <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> ) : ( <div><label htmlFor="sungrowTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sungrow Ticket</label><input type="text" name="sungrowTicket" value={formData.sungrowTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> )}
+                                        <div><label htmlFor="fiixTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fixx Ticket</label><input type="text" name="fiixTicket" value={formData.fiixTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
+                                    </>
+                                )}
                                 
+                                <div><label htmlFor="updatedInTeams" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated in Teams</label><select name="updatedInTeams" value={formData.updatedInTeams} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
                                 <div><label htmlFor="updatedViaEmail" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated Via Email</label><select name="updatedViaEmail" value={formData.updatedViaEmail} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
-
                                 <div className="md:col-span-2"><label htmlFor="additionalNotes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Additional Notes</label><textarea name="additionalNotes" rows="3" value={formData.additionalNotes} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
                             </fieldset>
                         </div>
@@ -1097,12 +1154,24 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-4">
                             <DetailItem icon={Check} label="Updated in Teams" value={ticket.updatedInTeams} />
                             <DetailItem icon={Mail} label="Updated via Email" value={ticket.updatedViaEmail} />
-                            {ticket.siteName === 'Defford' ? (
-                                <DetailItem label="POS Ticket #" value={ticket.pcsTicket} />
+                            {/* --- MAJOR CHANGE 1: Conditional display for ticket details --- */}
+                            {ticket.clientName === 'Puresky' ? (
+                                <>
+                                    <DetailItem label="PV/BESS" value={ticket.pvBess} />
+                                    <DetailItem label="Equipment" value={ticket.equipment} />
+                                    <DetailItem label="Equipment #" value={ticket.equipmentNumber} />
+                                    <DetailItem label="Issue Type" value={ticket.issueType} />
+                                </>
                             ) : (
-                                <DetailItem label="Sungrow Ticket #" value={ticket.sungrowTicket} />
+                                <>
+                                    {ticket.siteName === 'Defford' ? (
+                                        <DetailItem label="POS Ticket #" value={ticket.pcsTicket} />
+                                    ) : (
+                                        <DetailItem label="Sungrow Ticket #" value={ticket.sungrowTicket} />
+                                    )}
+                                    <DetailItem label="Fixx Ticket #" value={ticket.fiixTicket} />
+                                </>
                             )}
-                            <DetailItem label="Fixx Ticket #" value={ticket.fiixTicket} />
                         </div>
                     </div>
 
