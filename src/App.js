@@ -343,7 +343,6 @@ const LoginScreen = ({ auth, db }) => {
 function IssueTrackerApp({ user, auth, db }) {
     const [tickets, setTickets] = useState([]);
     const [trashedTickets, setTrashedTickets] = useState([]);
-    // FIX 2: Correctly manage loading state
     const [dataLoaded, setDataLoaded] = useState({ tickets: false, trash: false });
     const [isUploading, setIsUploading] = useState(false);
     const [toast, setToast] = useState(null);
@@ -365,7 +364,6 @@ function IssueTrackerApp({ user, auth, db }) {
     const [clientFilter, setClientFilter] = useState('All');
     const [siteFilter, setSiteFilter] = useState('All');
 
-    // FIX 2: isLoading is now derived from whether the data for the current view has loaded.
     const isLoading = (view === 'list' && !dataLoaded.tickets) || 
                       (view === 'trash' && !dataLoaded.trash) ||
                       (view === 'dashboard' && !dataLoaded.tickets);
@@ -399,7 +397,6 @@ function IssueTrackerApp({ user, auth, db }) {
         return () => { document.body.removeChild(jspdfScript); const autotable = document.querySelector('script[src*="autotable"]'); if(autotable) document.body.removeChild(autotable); document.body.removeChild(papaparseScript); };
     }, []);
 
-    // FIX 2: This effect now runs only once and is not dependent on the `view`.
     useEffect(() => {
         if (db) {
             const ticketsCollectionPath = `/artifacts/${appId}/public/data/tickets`;
@@ -439,7 +436,6 @@ function IssueTrackerApp({ user, auth, db }) {
         }
     }, [db]);
 
-    // FIX 4: Add an effect to clear selections when the view changes.
     useEffect(() => {
         setSelectedTickets([]);
         setSelectedTrashedTickets([]);
@@ -659,7 +655,6 @@ function IssueTrackerApp({ user, auth, db }) {
         }
     };
 
-    // FIX 6: Handle CSV import by notifying the user it's not implemented yet.
     const handleImport = (file) => {
         showToast("info", "CSV import feature is not yet implemented.");
     };
@@ -679,7 +674,6 @@ function IssueTrackerApp({ user, auth, db }) {
                         librariesLoaded={librariesLoaded} 
                         onImport={handleImport}
                         user={user}
-                        // FIX 3: Pass both selection states to the Toolbar
                         selectedTickets={selectedTickets}
                         selectedTrashedTickets={selectedTrashedTickets}
                         onBulkDelete={() => openDeleteModal(selectedTickets, false)}
@@ -815,7 +809,6 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
                         <Trash2 className="w-4 h-4 mr-1.5"/>Delete Selected ({selectedTickets.length})
                     </button>
                 )}
-                 {/* FIX 3: Correctly check selectedTrashedTickets for the trash view */}
                  {user.role === 'admin' && selectedTrashedTickets.length > 0 && view === 'trash' && (
                     <button onClick={onBulkPermanentDelete} className="flex items-center text-sm font-medium text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 bg-red-100 dark:bg-red-900/20 px-3 py-1.5 rounded-lg transition-colors">
                         <Trash2 className="w-4 h-4 mr-1.5"/>Delete Permanently ({selectedTrashedTickets.length})
@@ -832,13 +825,11 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
 
 const FilterControls = ({ searchTerm, setSearchTerm, statusFilter, setStatusFilter, clientFilter, setClientFilter, clientOptions, siteFilter, setSiteFilter, siteOptions, view }) => (
     <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4 border-b border-gray-200 dark:border-gray-700">
-        {/* FIX 1: The grid layout is adjusted to accommodate the new filter */}
         <div className="relative md:col-span-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" /><input type="text" placeholder="Search issues..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
         {view === 'list' && (
             <>
                 <div><select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option value="All">All Clients</option>{clientOptions.slice(1).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                 <div><select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)} className="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option value="All">All Sites</option>{siteOptions.slice(1).map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-                {/* FIX 1: Added the missing Status Filter dropdown */}
                 <div>
                     <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full py-2 px-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white">
                         <option value="All">All Statuses</option>
@@ -908,7 +899,8 @@ const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, 
         <td className="px-6 py-4 whitespace-nowrap text-sm"><span className={statusColor[ticket.status] || ''}>{ticket.status}</span></td>
         <td className="px-6 py-4 whitespace-nowrap text-sm"><span className={priorityColor[ticket.priority] || ''}>{ticket.priority}</span></td>
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ticket.issueStartTime ? new Date(ticket.issueStartTime).toLocaleString() : 'N/A'}</td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ticket.issueEndTime && ticket.status === 'Closed' ? new Date(ticket.issueEndTime).toLocaleString() : '—'}</td>
+        {/* CHANGE 3: Display manual issue end time if it exists, regardless of status. */}
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ticket.issueEndTime ? new Date(ticket.issueEndTime).toLocaleString() : '—'}</td>
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{formatDuration(ticket.issueStartTime, ticket.issueEndTime)}</td>
         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
             <button onClick={() => onViewDetails(ticket)} className="text-gray-500 hover:text-blue-700 dark:hover:text-blue-400 mr-4 transition-colors" title="View Details"><Eye className="w-5 h-5"/></button>
@@ -949,7 +941,6 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
     const handleSubmit = (e) => { 
         e.preventDefault(); 
         
-        // FIX 5: Enforce that "Issue End Time" is required if status is "Closed".
         if (formData.status === 'Closed' && !formData.issueEndTime) {
             showToast('error', 'Please provide a manual "Issue End Time" before closing the issue.');
             return;
@@ -995,7 +986,7 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
                                 
                                 {formData.siteName === 'Defford' ? ( <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> ) : ( <div><label htmlFor="sungrowTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sungrow Ticket</label><input type="text" name="sungrowTicket" value={formData.sungrowTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> )}
 
-                                <div><label htmlFor="fiixTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fix Ticket</label><input type="text" name="fiixTicket" value={formData.fiixTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
+                                <div><label htmlFor="fiixTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fixx Ticket</label><input type="text" name="fiixTicket" value={formData.fiixTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
                                 <div><label htmlFor="updatedInTeams" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated in Teams</label><select name="updatedInTeams" value={formData.updatedInTeams} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
                                 
                                 <div><label htmlFor="updatedViaEmail" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated Via Email</label><select name="updatedViaEmail" value={formData.updatedViaEmail} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
@@ -1031,6 +1022,7 @@ const LiveDuration = ({ startTime, endTime }) => {
 };
 
 
+// --- FINAL ENHANCEMENT 2 START ---
 const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
     if (!isOpen) return null;
 
@@ -1066,9 +1058,24 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                             <DetailItem icon={CheckCircle} label="Status" value={ticket.status} />
                             <DetailItem icon={Flag} label="Priority" value={ticket.priority} />
                             <DetailItem icon={UserCircle} label="Team Member" value={ticket.teamMember} />
-                            <DetailItem icon={UserCircle} label="Created By" value={ticket.authorEmail} />
+                            {/* CHANGE 1: "Created By" item is removed. */}
+                            {/* CHANGE 2: "Closed By" is already dynamic and shows the user who closed the ticket. It will only render if a name exists. */}
                              {ticket.closedByName && <DetailItem icon={Lock} label="Closed By" value={ticket.closedByName} />}
                         </div>
+                    </div>
+                    
+                    {/* CHANGE 5: Description & Notes Section is moved to the top */}
+                    <div className="space-y-4">
+                        <div>
+                             <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2 mb-2">Issue Description</h3>
+                             <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg text-sm">{ticket.description}</p>
+                        </div>
+                        {ticket.additionalNotes && (
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2 mb-2">Additional Notes</h3>
+                                <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg text-sm">{ticket.additionalNotes}</p>
+                            </div>
+                        )}
                     </div>
                     
                      {/* Timestamps Section */}
@@ -1090,24 +1097,14 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-4">
                             <DetailItem icon={Check} label="Updated in Teams" value={ticket.updatedInTeams} />
                             <DetailItem icon={Mail} label="Updated via Email" value={ticket.updatedViaEmail} />
-                            <DetailItem icon={Hash} label="POS Ticket #" value={ticket.pcsTicket} />
-                            <DetailItem icon={Hash} label="Sungrow Ticket #" value={ticket.sungrowTicket} />
-                            <DetailItem icon={Hash} label="Fix Ticket #" value={ticket.fiixTicket} />
+                            {/* CHANGE 4: Dynamic POS/Sungrow tickets, removed icons, and renamed Fixx ticket */}
+                            {ticket.siteName === 'Defford' ? (
+                                <DetailItem label="POS Ticket #" value={ticket.pcsTicket} />
+                            ) : (
+                                <DetailItem label="Sungrow Ticket #" value={ticket.sungrowTicket} />
+                            )}
+                            <DetailItem label="Fixx Ticket #" value={ticket.fiixTicket} />
                         </div>
-                    </div>
-
-                    {/* Description & Notes Section */}
-                    <div className="space-y-4">
-                        <div>
-                             <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2 mb-2">Issue Description</h3>
-                             <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg text-sm">{ticket.description}</p>
-                        </div>
-                        {ticket.additionalNotes && (
-                            <div>
-                                <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2 mb-2">Additional Notes</h3>
-                                <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg text-sm">{ticket.additionalNotes}</p>
-                            </div>
-                        )}
                     </div>
 
                 </div>
@@ -1120,6 +1117,7 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
         </div>
     );
 };
+// --- FINAL ENHANCEMENT 2 END ---
 
 
 // --- Remaining components (CloseConfirmationModal, DeleteConfirmationModal, etc.) ---
