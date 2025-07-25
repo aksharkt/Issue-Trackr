@@ -529,8 +529,11 @@ function IssueTrackerApp({ user, auth, db }) {
             }
         }
         
+        // CHANGE 1: Clear "Closed By" info when a ticket is reopened.
         if (selectedTicket?.status === 'Closed' && dataToSave.status !== 'Closed') {
             dataToSave.actualClosedAt = null;
+            dataToSave.closedByName = null;
+            dataToSave.closedByUid = null;
         }
 
         const path = `/artifacts/${appId}/public/data/tickets`;
@@ -899,7 +902,6 @@ const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, 
         <td className="px-6 py-4 whitespace-nowrap text-sm"><span className={statusColor[ticket.status] || ''}>{ticket.status}</span></td>
         <td className="px-6 py-4 whitespace-nowrap text-sm"><span className={priorityColor[ticket.priority] || ''}>{ticket.priority}</span></td>
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ticket.issueStartTime ? new Date(ticket.issueStartTime).toLocaleString() : 'N/A'}</td>
-        {/* CHANGE 3: Display manual issue end time if it exists, regardless of status. */}
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{ticket.issueEndTime ? new Date(ticket.issueEndTime).toLocaleString() : '—'}</td>
         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{formatDuration(ticket.issueStartTime, ticket.issueEndTime)}</td>
         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -919,7 +921,8 @@ const formatDateForInput = (date) => {
 };
 
 const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
-    const clientList = ['Metlen', 'Whirlbush', 'Amresco', 'Puresky', 'Clean Leaf', 'Cleve Hill'];
+    // CHANGE 2: Removed "Cleve Hill" and "Whirlbush" from the client list.
+    const clientList = ['Metlen', 'Amresco', 'Puresky', 'Clean Leaf'];
     const initialState = { teamMember: user.name || user.email, siteName: 'Defford', status: 'Open', description: '', updatedInTeams: 'No', updatedViaEmail: 'No', fiixTicket: '', pcsTicket: '', sungrowTicket: '', emailed: 'No', additionalNotes: '', clientName: 'Metlen', priority: 'Medium', issueStartTime: '', issueEndTime: '' };
     const [formData, setFormData] = useState(initialState);
     
@@ -980,8 +983,9 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
                                 <div><label htmlFor="priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Priority</label><select name="priority" value={formData.priority} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Low', 'Medium', 'High', 'Urgent'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
                                 
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className={`${ticket?.closedByName ? 'col-span-1' : 'col-span-2'}`}><label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label><select name="status" value={formData.status} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Open', 'In Progress', 'Closed'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                    {ticket?.closedByName && ( <div className="col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closed By</label><div className="mt-1 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 truncate" title={ticket.closedByName}>{ticket.closedByName}</div></div> )}
+                                    <div className={`${(formData.status === 'Closed' && ticket?.closedByName) ? 'col-span-1' : 'col-span-2'}`}><label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label><select name="status" value={formData.status} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Open', 'In Progress', 'Closed'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                    {/* CHANGE 1: "Closed By" field now only shows if the status in the form is "Closed". */}
+                                    {(formData.status === 'Closed' && ticket?.closedByName) && ( <div className="col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closed By</label><div className="mt-1 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 truncate" title={ticket.closedByName}>{ticket.closedByName}</div></div> )}
                                 </div>
                                 
                                 {formData.siteName === 'Defford' ? ( <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> ) : ( <div><label htmlFor="sungrowTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sungrow Ticket</label><input type="text" name="sungrowTicket" value={formData.sungrowTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> )}
@@ -1022,7 +1026,6 @@ const LiveDuration = ({ startTime, endTime }) => {
 };
 
 
-// --- FINAL ENHANCEMENT 2 START ---
 const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
     if (!isOpen) return null;
 
@@ -1058,13 +1061,10 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                             <DetailItem icon={CheckCircle} label="Status" value={ticket.status} />
                             <DetailItem icon={Flag} label="Priority" value={ticket.priority} />
                             <DetailItem icon={UserCircle} label="Team Member" value={ticket.teamMember} />
-                            {/* CHANGE 1: "Created By" item is removed. */}
-                            {/* CHANGE 2: "Closed By" is already dynamic and shows the user who closed the ticket. It will only render if a name exists. */}
-                             {ticket.closedByName && <DetailItem icon={Lock} label="Closed By" value={ticket.closedByName} />}
+                            {ticket.closedByName && <DetailItem icon={Lock} label="Closed By" value={ticket.closedByName} />}
                         </div>
                     </div>
                     
-                    {/* CHANGE 5: Description & Notes Section is moved to the top */}
                     <div className="space-y-4">
                         <div>
                              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2 mb-2">Issue Description</h3>
@@ -1097,7 +1097,6 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-4">
                             <DetailItem icon={Check} label="Updated in Teams" value={ticket.updatedInTeams} />
                             <DetailItem icon={Mail} label="Updated via Email" value={ticket.updatedViaEmail} />
-                            {/* CHANGE 4: Dynamic POS/Sungrow tickets, removed icons, and renamed Fixx ticket */}
                             {ticket.siteName === 'Defford' ? (
                                 <DetailItem label="POS Ticket #" value={ticket.pcsTicket} />
                             ) : (
@@ -1117,7 +1116,6 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
         </div>
     );
 };
-// --- FINAL ENHANCEMENT 2 END ---
 
 
 // --- Remaining components (CloseConfirmationModal, DeleteConfirmationModal, etc.) ---
