@@ -921,8 +921,6 @@ const formatDateForInput = (date) => {
 
 const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
     const clientList = ['Metlen', 'Amresco', 'Puresky', 'Clean Leaf'];
-    // --- Puresky-specific data ---
-    // FINAL CHANGE: Replaced placeholder sites with the provided list.
     const pureskySites = [
         'Adirondack - Connecticut River', 'Blossom B - Hamilton Brook', 'Canandaigua', 'Cedar Hill Solar', 'Clayton',
         'Clover Meadow', 'Cotuit', 'DeKalb I', 'DeKalb II', 'DeKalb III', 'Dover - Buckmaster Pond', 'Dudley Ground Mount (1-3)',
@@ -931,10 +929,10 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
         'Quiet Meadows 2', 'Tamarac', 'Three Rivers', 'Veseli', 'Volney', 'Wallum', 'Ware - Palmer Road', 'Westport A - Bass River',
         'White River Solar', 'Zumbro'
     ];
-    const pureskyPvBess = ['PV', 'BESS', 'PV+BESS'];
+    const pureskyPlantTypes = ['PV', 'BESS', 'PV+BESS']; 
     const pureskyEquipment = ['All', 'Combiner Box', 'DC-DC Converter', 'HVAC Alarm', 'Inverter', 'Power Manager', 'Recloser', 'String', 'Tracker', 'Weather Station', 'Whole Site'];
     const pureskyEquipmentNumbers = ['All', 'Multiple', ...Array.from({ length: 32 }, (_, i) => `${i + 1}`)];
-    const pureskyIssueTypes = ["Cannot confirm Production", "Communication Loss", "Production Impacting"];
+    const pureskyIssueTypes = ["Cannot confirm Production", "Communication Loss", "Generation Loss", "Derating", "Intermittent Comms", "Grid Voltage Loss"];
 
     const initialState = { 
         teamMember: user.name || user.email, 
@@ -951,14 +949,29 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
         priority: 'Medium', 
         issueStartTime: '', 
         issueEndTime: '',
-        // Puresky fields
-        pvBess: 'PV',
+        solarPlantType: 'PV',
         equipment: 'All',
         equipmentNumber: 'All',
         issueType: 'Communication Loss',
     };
 
     const [formData, setFormData] = useState(initialState);
+    
+    const dateConstraints = useMemo(() => {
+        const today = new Date();
+        const tomorrow = new Date();
+        tomorrow.setDate(today.getDate() + 1);
+
+        const toLocalISOString = (date) => {
+            const pad = (num) => (num < 10 ? '0' : '') + num;
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+        
+        const minDate = toLocalISOString(new Date(today.setHours(0, 0, 0, 0)));
+        const maxDate = toLocalISOString(new Date(tomorrow.setHours(23, 59, 59, 999)));
+
+        return { min: minDate, max: maxDate };
+    }, []);
     
     useEffect(() => {
         if (ticket) {
@@ -973,13 +986,10 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
         }
     }, [ticket, user]);
 
-    // Effect to handle changing form structure when client changes
     useEffect(() => {
-        // If client is changed TO Puresky, reset site name
         if (formData.clientName === 'Puresky') {
             setFormData(p => ({ ...p, siteName: pureskySites[0] }));
         } else {
-        // If client is changed FROM Puresky, reset to a default
             if (!['Defford', 'Whirlbush', 'Cleve Hill'].includes(formData.siteName)) {
                  setFormData(p => ({ ...p, siteName: 'Defford' }));
             }
@@ -1032,8 +1042,8 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
                                 <legend className="text-sm font-medium text-gray-600 dark:text-gray-400 px-2">Issue Details</legend>
                                 <div className="md:col-span-2"><label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label><textarea name="description" rows="3" value={formData.description} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
                                 
-                                <div><label htmlFor="issueStartTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Start Time (Manual)</label><input type="datetime-local" name="issueStartTime" value={formData.issueStartTime} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
-                                <div><label htmlFor="issueEndTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue End Time (Manual)</label><input type="datetime-local" name="issueEndTime" value={formData.issueEndTime} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
+                                <div><label htmlFor="issueStartTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Start Time</label><input type="datetime-local" name="issueStartTime" value={formData.issueStartTime} onChange={handleChange} required min={dateConstraints.min} max={dateConstraints.max} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
+                                <div><label htmlFor="issueEndTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue End Time</label><input type="datetime-local" name="issueEndTime" value={formData.issueEndTime} onChange={handleChange} min={dateConstraints.min} max={dateConstraints.max} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
 
                                 <div><label htmlFor="teamMember" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Team Member</label><input type="text" name="teamMember" value={formData.teamMember} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm bg-gray-100 dark:bg-gray-600" readOnly /></div>
                                 <div><label htmlFor="priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Priority</label><select name="priority" value={formData.priority} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Low', 'Medium', 'High', 'Urgent'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
@@ -1043,16 +1053,31 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
                                     {(formData.status === 'Closed' && ticket?.closedByName) && ( <div className="col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closed By</label><div className="mt-1 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 truncate" title={ticket.closedByName}>{ticket.closedByName}</div></div> )}
                                 </div>
                                 
-                                {formData.clientName === 'Puresky' ? (
+                                {/* --- Corrected Conditional Fields --- */}
+
+                                {/* Puresky-specific fields */}
+                                {formData.clientName === 'Puresky' && (
                                     <>
-                                        <div><label htmlFor="pvBess" className="block text-sm font-medium text-gray-700 dark:text-gray-300">PV/BESS</label><select name="pvBess" value={formData.pvBess} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyPvBess.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                        <div><label htmlFor="equipment" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment</label><select name="equipment" value={formData.equipment} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipment.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                        <div><label htmlFor="equipmentNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment Number</label><select name="equipmentNumber" value={formData.equipmentNumber} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipmentNumbers.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                        <div><label htmlFor="solarPlantType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Solar Plant Type</label><select name="solarPlantType" value={formData.solarPlantType} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyPlantTypes.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
                                         <div><label htmlFor="issueType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Type</label><select name="issueType" value={formData.issueType} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyIssueTypes.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
                                     </>
-                                ) : (
+                                )}
+
+                                {/* Equipment fields for Puresky OR Defford */}
+                                {(formData.clientName === 'Puresky' || formData.siteName === 'Defford') && (
                                     <>
-                                        {formData.siteName === 'Defford' ? ( <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> ) : ( <div><label htmlFor="sungrowTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sungrow Ticket</label><input type="text" name="sungrowTicket" value={formData.sungrowTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> )}
+                                        <div><label htmlFor="equipment" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment</label><select name="equipment" value={formData.equipment} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipment.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                        <div><label htmlFor="equipmentNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment Number</label><select name="equipmentNumber" value={formData.equipmentNumber} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipmentNumbers.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                    </>
+                                )}
+                                
+                                {/* Ticket number fields for non-Puresky clients */}
+                                {formData.clientName !== 'Puresky' && (
+                                    <>
+                                        {formData.siteName === 'Defford' 
+                                            ? ( <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> ) 
+                                            : ( <div><label htmlFor="sungrowTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sungrow Ticket</label><input type="text" name="sungrowTicket" value={formData.sungrowTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> )
+                                        }
                                         <div><label htmlFor="fiixTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fixx Ticket</label><input type="text" name="fiixTicket" value={formData.fiixTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
                                     </>
                                 )}
@@ -1146,9 +1171,9 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2">Timestamps & Duration</h3>
                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-4">
-                            <DetailItem icon={Clock} label="Manual Start Time" value={ticket.issueStartTime ? new Date(ticket.issueStartTime).toLocaleString() : 'N/A'} />
-                            <DetailItem icon={Clock} label="Manual End Time" value={ticket.issueEndTime ? new Date(ticket.issueEndTime).toLocaleString() : 'N/A'} />
-                            <DetailItem icon={Clock} label="Manual Response Time" value={formatDuration(ticket.issueStartTime, ticket.issueEndTime)} />
+                            <DetailItem icon={Clock} label="Issue Start Time" value={ticket.issueStartTime ? new Date(ticket.issueStartTime).toLocaleString() : 'N/A'} />
+                            <DetailItem icon={Clock} label="Issue End Time" value={ticket.issueEndTime ? new Date(ticket.issueEndTime).toLocaleString() : 'N/A'} />
+                            <DetailItem icon={Clock} label="Response Time" value={formatDuration(ticket.issueStartTime, ticket.issueEndTime)} />
                             <DetailItem icon={Clock} label="System Create Time" value={ticket.timestamp ? new Date(ticket.timestamp).toLocaleString() : 'N/A'} />
                             <DetailItem icon={Clock} label="System Close Time" value={ticket.actualClosedAt ? new Date(ticket.actualClosedAt).toLocaleString() : 'N/A'} />
                             <DetailItem icon={Clock} label="System Duration"><LiveDuration startTime={ticket.timestamp} endTime={ticket.actualClosedAt} /></DetailItem>
@@ -1161,9 +1186,11 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-4">
                             <DetailItem icon={Check} label="Updated in Teams" value={ticket.updatedInTeams} />
                             <DetailItem icon={Mail} label="Updated via Email" value={ticket.updatedViaEmail} />
+                            
+                            {/* --- Corrected Conditional Details --- */}
                             {ticket.clientName === 'Puresky' ? (
                                 <>
-                                    <DetailItem label="PV/BESS" value={ticket.pvBess} />
+                                    <DetailItem label="Solar Plant Type" value={ticket.solarPlantType} />
                                     <DetailItem label="Equipment" value={ticket.equipment} />
                                     <DetailItem label="Equipment Number" value={ticket.equipmentNumber} />
                                     <DetailItem label="Issue Type" value={ticket.issueType} />
@@ -1171,7 +1198,11 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                             ) : (
                                 <>
                                     {ticket.siteName === 'Defford' ? (
-                                        <DetailItem label="POS Ticket #" value={ticket.pcsTicket} />
+                                        <>
+                                            <DetailItem label="POS Ticket #" value={ticket.pcsTicket} />
+                                            <DetailItem label="Equipment" value={ticket.equipment} />
+                                            <DetailItem label="Equipment Number" value={ticket.equipmentNumber} />
+                                        </>
                                     ) : (
                                         <DetailItem label="Sungrow Ticket #" value={ticket.sungrowTicket} />
                                     )}
