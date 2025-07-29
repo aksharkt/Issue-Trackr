@@ -28,7 +28,9 @@ import {
     setLogLevel,
     writeBatch,
     getDoc,
-    setDoc
+    setDoc,
+    arrayUnion, // --- NEW ---
+    where        // --- NEW ---
 } from 'firebase/firestore';
 import { 
     ArrowUpDown, PlusCircle, Search, Trash2, Edit, X, PieChart, List, FileDown, Users, Eye, Mail, Phone, Upload, LogOut, Lock, Sun, Moon, AlertTriangle, CheckCircle, Info, Clock, ArchiveRestore, UserCircle, MessageSquare, AtSign, Hash, Check, Flag
@@ -46,15 +48,13 @@ const firebaseConfig = {
 };
 const appId = firebaseConfig.projectId;
 
-// --- Helper Functions and Components ---
+// --- Helper Functions and Components --- (No changes)
 
 const formatDuration = (start, end) => {
     if (!start) return "Awaiting Start...";
     const endTime = end || new Date(); 
     const diffMs = new Date(endTime) - new Date(start);
-
     if (diffMs < 0) return "—";
-
     let totalSeconds = Math.floor(diffMs / 1000);
     const days = Math.floor(totalSeconds / 86400);
     totalSeconds %= 86400;
@@ -62,16 +62,13 @@ const formatDuration = (start, end) => {
     totalSeconds %= 3600;
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-
     const parts = [];
     if (days > 0) parts.push(`${days}d`);
     if (hours > 0) parts.push(`${hours}h`);
     if (minutes > 0) parts.push(`${minutes}m`);
     parts.push(`${seconds}s`);
-    
     if (end) return parts.join(' ');
     if (!end && diffMs < 1000) return "Starting...";
-
     return parts.join(' ');
 };
 
@@ -130,6 +127,7 @@ export default function App() {
     );
 }
 
+// --- MODIFIED AuthRouter ---
 const AuthRouter = () => {
     const [user, setUser] = useState(null);
     const [auth, setAuth] = useState(null);
@@ -151,9 +149,12 @@ const AuthRouter = () => {
                     const userDocRef = doc(firestoreDb, `/artifacts/${appId}/public/data/users`, user.uid);
                     const userDoc = await getDoc(userDocRef);
                     if (userDoc.exists()) {
-                        setUser({ ...user, ...userDoc.data() });
+                        // --- MODIFIED: Fetch authorizedClients and add to user object ---
+                        const userData = userDoc.data();
+                        setUser({ ...user, ...userData, authorizedClients: userData.authorizedClients || [] });
                     } else {
-                        setUser({ ...user, role: 'user', name: user.displayName || user.email });
+                        // New user, no specific role or clients yet
+                        setUser({ ...user, role: 'user', name: user.displayName || user.email, authorizedClients: [] });
                     }
                 } else {
                     setUser(null);
@@ -180,7 +181,7 @@ const AuthRouter = () => {
 }
 
 
-// --- Login Screen Component --- (No changes)
+// --- MODIFIED Login Screen Component ---
 const LoginScreen = ({ auth, db }) => {
     const [isLoginView, setIsLoginView] = useState(true);
     const [isForgotPassword, setIsForgotPassword] = useState(false);
@@ -203,7 +204,8 @@ const LoginScreen = ({ auth, db }) => {
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 await updateProfile(userCredential.user, { displayName: name });
                 const userDocRef = doc(db, `/artifacts/${appId}/public/data/users`, userCredential.user.uid);
-                await setDoc(userDocRef, { role: 'user', email: userCredential.user.email, name: name, phone: '', employeeId: '' });
+                // --- MODIFIED: New users get an empty authorizedClients array ---
+                await setDoc(userDocRef, { role: 'user', email: userCredential.user.email, name: name, phone: '', employeeId: '', authorizedClients: [] });
             }
         } catch (error) {
             setError(error.message.replace('Firebase: ', ''));
@@ -214,9 +216,7 @@ const LoginScreen = ({ auth, db }) => {
     
     const handlePasswordReset = async (e) => {
         e.preventDefault();
-        setIsLoading(true);
-        setError('');
-        setSuccess('');
+        setIsLoading(true); setError(''); setSuccess('');
         try {
             await sendPasswordResetEmail(auth, email);
             setSuccess('Password reset email sent! Please check your inbox.');
@@ -234,7 +234,6 @@ const LoginScreen = ({ auth, db }) => {
         try {
             const result = await signInWithPopup(auth, provider);
             const user = result.user;
-            
             const userDocRef = doc(db, `/artifacts/${appId}/public/data/users`, user.uid);
             const userDoc = await getDoc(userDocRef);
 
@@ -244,7 +243,8 @@ const LoginScreen = ({ auth, db }) => {
                     email: user.email, 
                     name: user.displayName,
                     phone: '',
-                    employeeId: ''
+                    employeeId: '',
+                    authorizedClients: [] // --- MODIFIED ---
                 });
             }
         } catch (error) {
@@ -339,11 +339,12 @@ const LoginScreen = ({ auth, db }) => {
 };
 
 
-// --- Main Issue Tracker Application ---
+// --- HEAVILY MODIFIED IssueTrackerApp ---
 function IssueTrackerApp({ user, auth, db }) {
+    // --- EXISTING STATE ---
     const [tickets, setTickets] = useState([]);
     const [trashedTickets, setTrashedTickets] = useState([]);
-    const [dataLoaded, setDataLoaded] = useState({ tickets: false, trash: false });
+    const [dataLoaded, setDataLoaded] = useState({ tickets: false, trash: false, requests: false });
     const [isUploading, setIsUploading] = useState(false);
     const [toast, setToast] = useState(null);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -354,7 +355,7 @@ function IssueTrackerApp({ user, auth, db }) {
     const [selectedTicket, setSelectedTicket] = useState(null);
     const [selectedTickets, setSelectedTickets] = useState([]);
     const [selectedTrashedTickets, setSelectedTrashedTickets] = useState([]);
-    const [view, setView] = useState('list');
+    const [view, setView] = useState('dashboard'); // --- MODIFIED: Default view is dashboard ---
     const [librariesLoaded, setLibrariesLoaded] = useState({ pdf: false, csv: false });
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
@@ -364,15 +365,24 @@ function IssueTrackerApp({ user, auth, db }) {
     const [clientFilter, setClientFilter] = useState('All');
     const [siteFilter, setSiteFilter] = useState('All');
 
+    // --- NEW STATE ---
+    const [isAccessRequestModalOpen, setIsAccessRequestModalOpen] = useState(false);
+    const [accessRequests, setAccessRequests] = useState([]);
+
     const isLoading = (view === 'list' && !dataLoaded.tickets) || 
                       (view === 'trash' && !dataLoaded.trash) ||
-                      (view === 'dashboard' && !dataLoaded.tickets);
+                      (view === 'dashboard' && (!dataLoaded.tickets || (user.role === 'admin' && !dataLoaded.requests)));
 
+    // --- MODIFIED: clientOptions respects user's authorized clients ---
     const clientOptions = useMemo(() => {
         if (tickets.length === 0) return [];
-        const uniqueClients = [...new Set(tickets.map(t => t.clientName).filter(Boolean))];
+        let relevantTickets = tickets;
+        if (user.role !== 'admin' && user.authorizedClients?.length > 0) {
+            relevantTickets = tickets.filter(t => user.authorizedClients.includes(t.clientName));
+        }
+        const uniqueClients = [...new Set(relevantTickets.map(t => t.clientName).filter(Boolean))];
         return ['All', ...uniqueClients.sort()];
-    }, [tickets]);
+    }, [tickets, user]);
     
     const siteOptions = useMemo(() => {
         if (tickets.length === 0) return [];
@@ -387,8 +397,7 @@ function IssueTrackerApp({ user, auth, db }) {
 
     useEffect(() => {
         const loadScript = (src, onDone, onError) => {
-            const script = document.createElement('script');
-            script.src = src; script.async = true; script.onload = onDone; script.onerror = onError;
+            const script = document.createElement('script'); script.src = src; script.async = true; script.onload = onDone; script.onerror = onError;
             document.body.appendChild(script); return script;
         };
         const scriptErrorHandler = (scriptName) => (e) => { console.error(`Failed to load ${scriptName}.`, e); showToast("error", `Failed to load ${scriptName} library.`); };
@@ -397,52 +406,61 @@ function IssueTrackerApp({ user, auth, db }) {
         return () => { document.body.removeChild(jspdfScript); const autotable = document.querySelector('script[src*="autotable"]'); if(autotable) document.body.removeChild(autotable); document.body.removeChild(papaparseScript); };
     }, []);
 
+    // --- MODIFIED: Data fetching useEffect now fetches access requests for admins ---
     useEffect(() => {
-        if (db) {
-            const ticketsCollectionPath = `/artifacts/${appId}/public/data/tickets`;
-            const trashCollectionPath = `/artifacts/${appId}/public/data/trash`;
-            
-            const ticketsQuery = query(collection(db, ticketsCollectionPath));
-            const trashQuery = query(collection(db, trashCollectionPath));
+        if (!db) return;
 
-            const unsubTickets = onSnapshot(ticketsQuery, (snapshot) => {
-                const ticketsData = snapshot.docs.map(doc => {
-                    const data = doc.data();
-                    const safeGetDate = (fieldValue) => fieldValue?.toDate ? fieldValue.toDate() : null;
-                    return { 
-                        id: doc.id, 
-                        ...data, 
-                        timestamp: safeGetDate(data.timestamp), 
-                        issueStartTime: safeGetDate(data.issueStartTime), 
-                        issueEndTime: safeGetDate(data.issueEndTime),
-                        actualClosedAt: safeGetDate(data.actualClosedAt)
-                    };
-                });
-                setTickets(ticketsData);
-                setDataLoaded(prev => ({...prev, tickets: true}));
-            }, (err) => { console.error("Firestore snapshot error (tickets):", err); showToast("error", "Failed to fetch tickets."); });
+        const ticketsCollectionPath = `/artifacts/${appId}/public/data/tickets`;
+        const trashCollectionPath = `/artifacts/${appId}/public/data/trash`;
+        const requestsCollectionPath = `/artifacts/${appId}/public/data/accessRequests`;
 
-            const unsubTrash = onSnapshot(trashQuery, (snapshot) => {
-                const trashedData = snapshot.docs.map(doc => {
-                    const data = doc.data();
-                    const safeGetDate = (fieldValue) => fieldValue?.toDate ? fieldValue.toDate() : null;
-                    return { id: doc.id, ...data, deletedAt: safeGetDate(data.deletedAt) };
-                });
-                setTrashedTickets(trashedData);
-                setDataLoaded(prev => ({...prev, trash: true}));
-            }, (err) => { console.error("Firestore snapshot error (trash):", err); showToast("error", "Failed to fetch trashed tickets."); });
+        const ticketsQuery = query(collection(db, ticketsCollectionPath));
+        const unsubTickets = onSnapshot(ticketsQuery, (snapshot) => {
+            const ticketsData = snapshot.docs.map(doc => {
+                const data = doc.data(); const safeGetDate = (fieldValue) => fieldValue?.toDate ? fieldValue.toDate() : null;
+                return { id: doc.id, ...data, timestamp: safeGetDate(data.timestamp), issueStartTime: safeGetDate(data.issueStartTime), issueEndTime: safeGetDate(data.issueEndTime), actualClosedAt: safeGetDate(data.actualClosedAt) };
+            });
+            setTickets(ticketsData);
+            setDataLoaded(prev => ({...prev, tickets: true}));
+        }, (err) => { console.error("Firestore snapshot error (tickets):", err); showToast("error", "Failed to fetch tickets."); });
 
-            return () => { unsubTickets(); unsubTrash(); };
+        const trashQuery = query(collection(db, trashCollectionPath));
+        const unsubTrash = onSnapshot(trashQuery, (snapshot) => {
+            const trashedData = snapshot.docs.map(doc => {
+                const data = doc.data(); const safeGetDate = (fieldValue) => fieldValue?.toDate ? fieldValue.toDate() : null;
+                return { id: doc.id, ...data, deletedAt: safeGetDate(data.deletedAt) };
+            });
+            setTrashedTickets(trashedData);
+            setDataLoaded(prev => ({...prev, trash: true}));
+        }, (err) => { console.error("Firestore snapshot error (trash):", err); showToast("error", "Failed to fetch trashed tickets."); });
+
+        let unsubRequests = () => {};
+        if (user.role === 'admin') {
+            const requestsQuery = query(collection(db, requestsCollectionPath), where("status", "==", "pending"));
+            unsubRequests = onSnapshot(requestsQuery, (snapshot) => {
+                const requestsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setAccessRequests(requestsData);
+                setDataLoaded(prev => ({...prev, requests: true}));
+            }, (err) => { console.error("Firestore snapshot error (requests):", err); showToast("error", "Failed to fetch access requests."); });
         }
-    }, [db]);
+
+        return () => { unsubTickets(); unsubTrash(); unsubRequests(); };
+    }, [db, user.role]);
 
     useEffect(() => {
         setSelectedTickets([]);
         setSelectedTrashedTickets([]);
     }, [view]);
 
+    // --- MODIFIED: Filtering logic now enforces access control ---
     const filteredAndSortedTickets = useMemo(() => {
-        const source = view === 'trash' ? trashedTickets : tickets;
+        let source = view === 'trash' ? trashedTickets : tickets;
+
+        // --- ACCESS CONTROL FILTER ---
+        if (user.role !== 'admin' && view !== 'trash') {
+            source = source.filter(ticket => user.authorizedClients?.includes(ticket.clientName));
+        }
+
         let processedTickets = [...source];
         processedTickets = processedTickets.filter(ticket => {
             const searchLower = searchTerm.toLowerCase();
@@ -463,7 +481,7 @@ function IssueTrackerApp({ user, auth, db }) {
             });
         }
         return processedTickets;
-    }, [tickets, trashedTickets, searchTerm, statusFilter, clientFilter, siteFilter, sortConfig, view]);
+    }, [tickets, trashedTickets, searchTerm, statusFilter, clientFilter, siteFilter, sortConfig, view, user]);
 
     const requestSort = (key) => {
         let direction = 'ascending';
@@ -475,37 +493,58 @@ function IssueTrackerApp({ user, auth, db }) {
     const closeEditModal = () => { setIsEditModalOpen(false); setSelectedTicket(null); };
     const openDetailModal = (ticket) => { setSelectedTicket(ticket); setIsDetailModalOpen(true); };
     const closeDetailModal = () => { setIsDetailModalOpen(false); setSelectedTicket(null); };
-    const openDeleteModal = (ticketIds, isPermanent = false) => {
-        setTicketsToDelete(Array.isArray(ticketIds) ? ticketIds : [ticketIds]);
-        setIsPermanentDelete(isPermanent);
-        setIsDeleteModalOpen(true);
+    const openDeleteModal = (ticketIds, isPermanent = false) => { setTicketsToDelete(Array.isArray(ticketIds) ? ticketIds : [ticketIds]); setIsPermanentDelete(isPermanent); setIsDeleteModalOpen(true); };
+    const closeDeleteModal = () => { setIsDeleteModalOpen(false); setTicketsToDelete([]); };
+    const openCloseModal = (ticket) => { if (!ticket.issueEndTime) { showToast('error', 'Please edit the issue and add a manual "Issue End Time" before closing.'); return; } setTicketToClose(ticket); setIsCloseModalOpen(true); };
+    const closeCloseModal = () => { setIsCloseModalOpen(false); setTicketToClose(null); };
+
+    // --- NEW: Functions for Access Request Modal ---
+    const openAccessRequestModal = () => setIsAccessRequestModalOpen(true);
+    const closeAccessRequestModal = () => setIsAccessRequestModalOpen(false);
+
+    // --- NEW: Function to handle submitting an access request ---
+    const handleRequestAccess = async (clientName) => {
+        if (!db) return showToast("error", "Database not connected.");
+        const requestData = { userId: user.uid, userName: user.name || user.email, userEmail: user.email, clientName: clientName, status: 'pending', timestamp: serverTimestamp() };
+        try {
+            await addDoc(collection(db, `/artifacts/${appId}/public/data/accessRequests`), requestData);
+            showToast("success", `Request for access to ${clientName} has been sent for admin approval.`);
+            closeAccessRequestModal();
+        } catch (e) { console.error("Error submitting access request:", e); showToast("error", "Failed to submit access request."); }
     };
-    const closeDeleteModal = () => {
-        setIsDeleteModalOpen(false);
-        setTicketsToDelete([]);
+
+    // --- NEW: Functions for Admins to manage requests ---
+    const handleApproveRequest = async (request) => {
+        if (!db) return showToast("error", "Database not connected.");
+        const batch = writeBatch(db);
+        const userDocRef = doc(db, `/artifacts/${appId}/public/data/users`, request.userId);
+        batch.update(userDocRef, { authorizedClients: arrayUnion(request.clientName) });
+        const requestDocRef = doc(db, `/artifacts/${appId}/public/data/accessRequests`, request.id);
+        batch.update(requestDocRef, { status: 'granted' });
+        try {
+            await batch.commit();
+            showToast("success", `Access granted to ${request.userName} for ${request.clientName}.`);
+        } catch (e) { console.error("Error approving request:", e); showToast("error", "Failed to approve request."); }
     };
     
-    const openCloseModal = (ticket) => { 
-        if (!ticket.issueEndTime) {
-            showToast('error', 'Please edit the issue and add a manual "Issue End Time" before closing.');
-            return;
-        }
-        setTicketToClose(ticket); 
-        setIsCloseModalOpen(true); 
+    const handleDenyRequest = async (requestId) => {
+        if (!db) return showToast("error", "Database not connected.");
+        const requestDocRef = doc(db, `/artifacts/${appId}/public/data/accessRequests`, requestId);
+        try {
+            await updateDoc(requestDocRef, { status: 'denied' });
+            showToast("info", "Request has been denied.");
+        } catch (e) { console.error("Error denying request:", e); showToast("error", "Failed to deny request."); }
     };
-    const closeCloseModal = () => { setIsCloseModalOpen(false); setTicketToClose(null); };
 
     const handleSelectTicket = (ticketId) => {
         const targetState = view === 'trash' ? setSelectedTrashedTickets : setSelectedTickets;
-        targetState(prev => 
-            prev.includes(ticketId) ? prev.filter(id => id !== ticketId) : [...prev, ticketId]
-        );
+        targetState(prev => prev.includes(ticketId) ? prev.filter(id => id !== ticketId) : [...prev, ticketId]);
     };
 
     const handleSelectAllTickets = () => {
         const targetStateSetter = view === 'trash' ? setSelectedTrashedTickets : setSelectedTickets;
         const selectedState = view === 'trash' ? selectedTrashedTickets : selectedTickets;
-        if (selectedState.length === filteredAndSortedTickets.length) {
+        if (selectedState.length > 0 && selectedState.length === filteredAndSortedTickets.length) {
             targetStateSetter([]);
         } else {
             targetStateSetter(filteredAndSortedTickets.map(t => t.id));
@@ -515,24 +554,15 @@ function IssueTrackerApp({ user, auth, db }) {
     const handleSaveTicket = async (formData) => {
         if (!db) return showToast("error", "Database not connected.");
         
-        const dataToSave = {
-            ...formData,
-            issueStartTime: formData.issueStartTime ? new Date(formData.issueStartTime) : serverTimestamp(),
-            issueEndTime: formData.issueEndTime ? new Date(formData.issueEndTime) : null,
-        };
+        const dataToSave = { ...formData, issueStartTime: formData.issueStartTime ? new Date(formData.issueStartTime) : serverTimestamp(), issueEndTime: formData.issueEndTime ? new Date(formData.issueEndTime) : null, };
         
         if (dataToSave.status === 'Closed' && !selectedTicket?.actualClosedAt) {
             dataToSave.actualClosedAt = serverTimestamp();
-            if (!dataToSave.closedByName) {
-                dataToSave.closedByName = user.name || user.email;
-                dataToSave.closedByUid = user.uid;
-            }
+            if (!dataToSave.closedByName) { dataToSave.closedByName = user.name || user.email; dataToSave.closedByUid = user.uid; }
         }
         
         if (selectedTicket?.status === 'Closed' && dataToSave.status !== 'Closed') {
-            dataToSave.actualClosedAt = null;
-            dataToSave.closedByName = null;
-            dataToSave.closedByUid = null;
+            dataToSave.actualClosedAt = null; dataToSave.closedByName = null; dataToSave.closedByUid = null;
         }
 
         const path = `/artifacts/${appId}/public/data/tickets`;
@@ -552,22 +582,13 @@ function IssueTrackerApp({ user, auth, db }) {
     
     const handleConfirmClose = async (password) => {
         if (!ticketToClose) return showToast("error", "No issue selected.");
-        
         const credential = EmailAuthProvider.credential(auth.currentUser.email, password);
         try {
             await reauthenticateWithCredential(auth.currentUser, credential);
-            
             const ticketRef = doc(db, `/artifacts/${appId}/public/data/tickets`, ticketToClose.id);
-            await updateDoc(ticketRef, { 
-                status: 'Closed', 
-                actualClosedAt: serverTimestamp(), 
-                closedByUid: user.uid, 
-                closedByName: user.name || user.email 
-            });
-
+            await updateDoc(ticketRef, { status: 'Closed', actualClosedAt: serverTimestamp(), closedByUid: user.uid, closedByName: user.name || user.email });
             showToast("success", `Issue #${ticketToClose.id.substring(0,5)}... closed successfully!`);
             closeCloseModal();
-
         } catch (error) {
             console.error("Reauthentication/Closing failed:", error);
             showToast("error", "Incorrect password. Issue was not closed.");
@@ -580,14 +601,11 @@ function IssueTrackerApp({ user, auth, db }) {
         const credential = EmailAuthProvider.credential(user.email, password);
         try {
             await reauthenticateWithCredential(auth.currentUser, credential);
-            if (isPermanentDelete) {
-                await handlePermanentDelete();
-            } else {
-                await handleSoftDelete();
-            }
+            if (isPermanentDelete) { await handlePermanentDelete(); } else { await handleSoftDelete(); }
         } catch (error) {
             console.error("Reauthentication failed:", error);
             showToast("error", "Incorrect password. Deletion cancelled.");
+            throw error;
         }
     };
 
@@ -595,7 +613,6 @@ function IssueTrackerApp({ user, auth, db }) {
         const batch = writeBatch(db);
         const ticketsCollectionPath = `/artifacts/${appId}/public/data/tickets`;
         const trashCollectionPath = `/artifacts/${appId}/public/data/trash`;
-
         ticketsToDelete.forEach(ticketId => {
             const originalDocRef = doc(db, ticketsCollectionPath, ticketId);
             const ticketToMove = tickets.find(t => t.id === ticketId);
@@ -605,34 +622,22 @@ function IssueTrackerApp({ user, auth, db }) {
                 batch.delete(originalDocRef);
             }
         });
-
         try {
             await batch.commit();
             showToast("info", `${ticketsToDelete.length} issue(s) moved to trash.`);
-            closeDeleteModal();
-            setSelectedTickets([]);
-        } catch (e) {
-            console.error("Error moving issues to trash:", e);
-            showToast("error", "Failed to move issues to trash.");
-        }
+            closeDeleteModal(); setSelectedTickets([]);
+        } catch (e) { console.error("Error moving issues to trash:", e); showToast("error", "Failed to move issues to trash."); }
     };
     
     const handlePermanentDelete = async () => {
         const batch = writeBatch(db);
         const trashCollectionPath = `/artifacts/${appId}/public/data/trash`;
-        ticketsToDelete.forEach(ticketId => {
-            const trashDocRef = doc(db, trashCollectionPath, ticketId);
-            batch.delete(trashDocRef);
-        });
+        ticketsToDelete.forEach(ticketId => { batch.delete(doc(db, trashCollectionPath, ticketId)); });
         try {
             await batch.commit();
             showToast("success", `${ticketsToDelete.length} issue(s) permanently deleted.`);
-            closeDeleteModal();
-            setSelectedTrashedTickets([]);
-        } catch (e) {
-            console.error("Error permanently deleting issues:", e);
-            showToast("error", "Failed to permanently delete issues.");
-        }
+            closeDeleteModal(); setSelectedTrashedTickets([]);
+        } catch (e) { console.error("Error permanently deleting issues:", e); showToast("error", "Failed to permanently delete issues."); }
     };
 
     const handleRestoreTicket = async (ticketId) => {
@@ -641,25 +646,17 @@ function IssueTrackerApp({ user, auth, db }) {
         const trashCollectionPath = `/artifacts/${appId}/public/data/trash`;
         const trashDocRef = doc(db, trashCollectionPath, ticketId);
         const ticketToRestore = trashedTickets.find(t => t.id === ticketId);
-
         if (ticketToRestore) {
             const newTicketRef = doc(db, ticketsCollectionPath, ticketId);
             const { deletedAt, ...restoredData } = ticketToRestore;
             batch.set(newTicketRef, restoredData);
             batch.delete(trashDocRef);
-            try {
-                await batch.commit();
-                showToast("success", "Issue restored successfully.");
-            } catch (e) {
-                console.error("Error restoring issue:", e);
-                showToast("error", "Failed to restore issue.");
-            }
+            try { await batch.commit(); showToast("success", "Issue restored successfully."); } 
+            catch (e) { console.error("Error restoring issue:", e); showToast("error", "Failed to restore issue."); }
         }
     };
 
-    const handleImport = (file) => {
-        showToast("info", "CSV import feature is not yet implemented.");
-    };
+    const handleImport = (file) => { showToast("info", "CSV import feature is not yet implemented."); };
 
     return (
         <div className="bg-gray-100 dark:bg-gray-900 min-h-screen font-sans text-gray-800 dark:text-gray-200">
@@ -671,11 +668,19 @@ function IssueTrackerApp({ user, auth, db }) {
                 <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg mt-6">
                     <Toolbar 
                         view={view} 
-                        setView={setView} 
+                        setView={setView}
+                        user={user}
+                        // --- MODIFIED: Pass new handler for list navigation ---
+                        onNavigateToList={() => {
+                            if (user.role === 'admin' || user.authorizedClients?.length > 0) {
+                                setView('list');
+                            } else {
+                                openAccessRequestModal();
+                            }
+                        }}
                         tickets={filteredAndSortedTickets} 
                         librariesLoaded={librariesLoaded} 
                         onImport={handleImport}
-                        user={user}
                         selectedTickets={selectedTickets}
                         selectedTrashedTickets={selectedTrashedTickets}
                         onBulkDelete={() => openDeleteModal(selectedTickets, false)}
@@ -693,8 +698,14 @@ function IssueTrackerApp({ user, auth, db }) {
                     }
                     <main className="p-4 md:p-6">
                         {isLoading ? <LoadingSpinner /> : (
-                            view === 'dashboard' ? <Dashboard tickets={tickets} /> :
-                            view === 'list' ?
+                            view === 'dashboard' ? <Dashboard 
+                                                        tickets={tickets} // Pass all tickets for potential full view for admin
+                                                        user={user}
+                                                        requests={accessRequests}
+                                                        onApprove={handleApproveRequest}
+                                                        onDeny={handleDenyRequest}
+                                                    /> :
+                            view === 'list' && (user.role === 'admin' || user.authorizedClients?.length > 0) ?
                             <TicketList 
                                 tickets={filteredAndSortedTickets} 
                                 user={user} 
@@ -708,6 +719,14 @@ function IssueTrackerApp({ user, auth, db }) {
                                 onSelectAllTickets={handleSelectAllTickets}
                                 onCloseTicket={openCloseModal}
                             /> :
+                            view === 'list' ? 
+                            <div className="text-center py-16 text-gray-500 dark:text-gray-400">
+                                <Info className="w-10 h-10 mx-auto mb-4 text-blue-500"/>
+                                <p className="mb-4">You do not have permission to view any client issues yet.</p>
+                                <button onClick={openAccessRequestModal} className="text-blue-600 font-semibold hover:underline">
+                                    Click here to request access.
+                                </button>
+                            </div> :
                             view === 'trash' ?
                             <TrashList 
                                 tickets={filteredAndSortedTickets}
@@ -722,10 +741,14 @@ function IssueTrackerApp({ user, auth, db }) {
                     </main>
                 </div>
 
-                {isEditModalOpen && <TicketForm isOpen={isEditModalOpen} onClose={closeEditModal} onSave={handleSaveTicket} ticket={selectedTicket} user={user} showToast={showToast} />}
-                {isDetailModalOpen && <TicketDetailModal isOpen={isDetailModalOpen} onClose={closeDetailModal} ticket={selectedTicket} />}
-                {isDeleteModalOpen && <DeleteConfirmationModal isOpen={isDeleteModalOpen} onClose={closeDeleteModal} onConfirm={handleConfirmDelete} count={ticketsToDelete.length} isPermanent={isPermanentDelete} />}
-                {isCloseModalOpen && <CloseConfirmationModal isOpen={isCloseModalOpen} onClose={closeCloseModal} onConfirm={handleConfirmClose} ticket={ticketToClose} />}
+                <div id="modal-root">
+                    {isEditModalOpen && <TicketForm isOpen={isEditModalOpen} onClose={closeEditModal} onSave={handleSaveTicket} ticket={selectedTicket} user={user} showToast={showToast} />}
+                    {isDetailModalOpen && <TicketDetailModal isOpen={isDetailModalOpen} onClose={closeDetailModal} ticket={selectedTicket} />}
+                    {isDeleteModalOpen && <DeleteConfirmationModal isOpen={isDeleteModalOpen} onClose={closeDeleteModal} onConfirm={handleConfirmDelete} count={ticketsToDelete.length} isPermanent={isPermanentDelete} />}
+                    {isCloseModalOpen && <CloseConfirmationModal isOpen={isCloseModalOpen} onClose={closeCloseModal} onConfirm={handleConfirmClose} ticket={ticketToClose} />}
+                    {/* --- NEW: Render the access request modal --- */}
+                    {isAccessRequestModalOpen && <AccessRequestModal isOpen={isAccessRequestModalOpen} onClose={closeAccessRequestModal} user={user} onSubmit={handleRequestAccess} />}
+                </div>
             </div>
         </div>
     );
@@ -763,9 +786,9 @@ const Header = ({ onNewTicket, user, auth, setView }) => {
 );
 };
 
-const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, selectedTickets, selectedTrashedTickets, onBulkDelete, onBulkPermanentDelete, showToast }) => {
+// --- MODIFIED Toolbar ---
+const Toolbar = ({ view, setView, onNavigateToList, tickets, librariesLoaded, onImport, user, selectedTickets, selectedTrashedTickets, onBulkDelete, onBulkPermanentDelete, showToast }) => {
     const importInputRef = useRef(null);
-    
     const exportToCSV = () => {
         if (!librariesLoaded.csv || !window.Papa) return showToast('error', 'CSV library not ready.');
         if (tickets.length === 0) return showToast('info', 'No data to export.');
@@ -779,7 +802,6 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
         showToast('success', 'CSV export started.');
     };
-
     const exportToPDF = () => {
         if (!librariesLoaded.pdf || !window.jspdf) return showToast('error', 'PDF library not ready.');
         if (tickets.length === 0) return showToast('info', 'No data to export.');
@@ -794,7 +816,6 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
         doc.save(`issues-export-${new Date().toISOString().split('T')[0]}.pdf`);
         showToast('success', 'PDF export started.');
     };
-    
     const handleImportClick = () => { importInputRef.current.click(); };
     const handleFileChange = (event) => { const file = event.target.files[0]; onImport(file); event.target.value = null; };
 
@@ -802,7 +823,8 @@ const Toolbar = ({ view, setView, tickets, librariesLoaded, onImport, user, sele
         <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-center bg-gray-50/50 dark:bg-gray-800/20 rounded-t-xl">
             <div className="flex items-center space-x-1 bg-gray-200 dark:bg-gray-700 p-1 rounded-lg mb-3 sm:mb-0">
                 <button onClick={() => setView('dashboard')} className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${view === 'dashboard' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-600/50'}`}><PieChart className="w-4 h-4 inline-block mr-2"/>Dashboard</button>
-                <button onClick={() => setView('list')} className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${view === 'list' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-600/50'}`}><List className="w-4 h-4 inline-block mr-2"/>Issue List</button>
+                {/* --- MODIFIED onClick --- */}
+                <button onClick={onNavigateToList} className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${view === 'list' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-600/50'}`}><List className="w-4 h-4 inline-block mr-2"/>Issue List</button>
                 {user.role === 'admin' && <button onClick={() => setView('trash')} className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${view === 'trash' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-600/50'}`}><Trash2 className="w-4 h-4 inline-block mr-2"/>Trash</button>}
             </div>
             <div className="flex items-center space-x-3">
@@ -844,18 +866,47 @@ const FilterControls = ({ searchTerm, setSearchTerm, statusFilter, setStatusFilt
         )}
     </div>
 );
-const Dashboard = ({ tickets }) => {
+
+// --- MODIFIED Dashboard ---
+const Dashboard = ({ tickets, user, requests, onApprove, onDeny }) => {
     const stats = useMemo(() => {
-        const total = tickets.length;
-        const open = tickets.filter(t => t.status === 'Open' || t.status === 'In Progress').length;
-        const closed = tickets.filter(t => t.status === 'Closed').length;
-        const highPriority = tickets.filter(t => t.priority === 'High' && t.status !== 'Closed').length;
-        const byStatus = tickets.reduce((acc, t) => { acc[t.status] = (acc[t.status] || 0) + 1; return acc; }, {});
-        const byPriority = tickets.reduce((acc, t) => { acc[t.priority] = (acc[t.priority] || 0) + 1; return acc; }, {});
+        // --- MODIFIED: Stats are now based on user's authorized clients ---
+        const relevantTickets = user.role === 'admin' ? tickets : tickets.filter(t => user.authorizedClients?.includes(t.clientName));
+        const total = relevantTickets.length;
+        const open = relevantTickets.filter(t => t.status === 'Open' || t.status === 'In Progress').length;
+        const closed = relevantTickets.filter(t => t.status === 'Closed').length;
+        const highPriority = relevantTickets.filter(t => t.priority === 'High' && t.status !== 'Closed').length;
+        const byStatus = relevantTickets.reduce((acc, t) => { acc[t.status] = (acc[t.status] || 0) + 1; return acc; }, {});
+        const byPriority = relevantTickets.reduce((acc, t) => { acc[t.priority] = (acc[t.priority] || 0) + 1; return acc; }, {});
         return { total, open, closed, highPriority, byStatus, byPriority };
-    }, [tickets]);
+    }, [tickets, user]);
+    
     return (
         <div className="space-y-6">
+            {/* --- NEW: Admin-only access request section --- */}
+            {user.role === 'admin' && requests.length > 0 && (
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 p-5 rounded-xl border border-yellow-400 dark:border-yellow-600 shadow-lg">
+                    <h3 className="font-semibold text-gray-800 dark:text-white mb-4 flex items-center">
+                        <Users className="w-5 h-5 mr-3 text-yellow-600 dark:text-yellow-400"/>
+                        Pending Access Requests ({requests.length})
+                    </h3>
+                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+                        {requests.map(req => (
+                            <div key={req.id} className="flex justify-between items-center p-3 rounded-lg bg-white dark:bg-gray-800/60 shadow-sm">
+                                <div>
+                                    <p className="font-medium text-sm text-gray-900 dark:text-white">{req.userName}</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">Wants access to: <span className="font-semibold">{req.clientName}</span></p>
+                                </div>
+                                <div className="flex space-x-2">
+                                    <button onClick={() => onApprove(req)} className="px-3 py-1 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Approve</button>
+                                    <button onClick={() => onDeny(req.id)} className="px-3 py-1 text-xs font-semibold text-gray-700 bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500 rounded-md transition-colors">Deny</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6"><StatCard title="Total Issues" value={stats.total} /><StatCard title="Open Issues" value={stats.open} /><StatCard title="Closed Issues" value={stats.closed} /><StatCard title="Urgent Open" value={stats.highPriority} /></div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6"><ChartCard title="Issues by Status" data={stats.byStatus} /><ChartCard title="Issues by Priority" data={stats.byPriority} /></div>
         </div>
@@ -870,7 +921,7 @@ const ChartCard = ({ title, data }) => {
 };
 
 const TicketList = ({ tickets, user, onEdit, onDelete, onViewDetails, requestSort, sortConfig, selectedTickets, onSelectTicket, onSelectAllTickets, onCloseTicket }) => {
-    if (tickets.length === 0) return <p className="text-center py-16 text-gray-500 dark:text-gray-400">No issues found.</p>;
+    if (tickets.length === 0) return <p className="text-center py-16 text-gray-500 dark:text-gray-400">No issues found for your authorized clients.</p>;
     const getSortIndicator = (key) => { if (sortConfig.key === key) return sortConfig.direction === 'ascending' ? '▲' : '▼'; return <ArrowUpDown className="w-4 h-4 inline-block ml-1 text-gray-400" />; };
     return (<div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700"><thead className="bg-gray-50 dark:bg-gray-700"><tr>{user.role === 'admin' && <th className="px-6 py-3 text-left"><input type="checkbox" className="rounded dark:bg-gray-900 dark:border-gray-600" onChange={onSelectAllTickets} checked={tickets.length > 0 && selectedTickets.length === tickets.length} /></th>}<th onClick={() => requestSort('clientName')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Issue Details {getSortIndicator('clientName')}</th><th onClick={() => requestSort('status')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Status {getSortIndicator('status')}</th><th onClick={() => requestSort('priority')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer">Priority {getSortIndicator('priority')}</th><th onClick={() => requestSort('issueStartTime')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Issue Start Time {getSortIndicator('issueStartTime')}</th><th onClick={() => requestSort('issueEndTime')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Issue End Time {getSortIndicator('issueEndTime')}</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Response Time</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th></tr></thead><tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">{tickets.map(ticket => <TicketRow key={ticket.id} ticket={ticket} user={user} onEdit={onEdit} onDelete={onDelete} onViewDetails={onViewDetails} isSelected={selectedTickets.includes(ticket.id)} onSelectTicket={onSelectTicket} onCloseTicket={onCloseTicket} />)}</tbody></table></div>);
 };
@@ -880,17 +931,8 @@ const TicketRow = ({ ticket, user, onEdit, onDelete, onViewDetails, isSelected, 
     const canDelete = user.role === 'admin';
     const canClose = ticket.status !== 'Closed';
 
-    const statusColor = { 
-        'Open': 'text-red-700 dark:text-red-400 font-semibold', 
-        'In Progress': 'text-blue-700 dark:text-blue-400', 
-        'Closed': 'text-green-700 dark:text-green-500 font-semibold' 
-    };
-    const priorityColor = { 
-        'Urgent': 'text-red-800 dark:text-red-500 font-bold',
-        'High': 'text-orange-600 dark:text-orange-400 font-semibold',
-        'Medium': 'text-yellow-800 dark:text-yellow-500',
-        'Low': 'text-green-700 dark:text-green-500'
-    };
+    const statusColor = { 'Open': 'text-red-700 dark:text-red-400 font-semibold', 'In Progress': 'text-blue-700 dark:text-blue-400', 'Closed': 'text-green-700 dark:text-green-500 font-semibold' };
+    const priorityColor = { 'Urgent': 'text-red-800 dark:text-red-500 font-bold', 'High': 'text-orange-600 dark:text-orange-400 font-semibold', 'Medium': 'text-yellow-800 dark:text-yellow-500', 'Low': 'text-green-700 dark:text-green-500' };
     
     return (<tr className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
         {user.role === 'admin' && <td className="px-6 py-4"><input type="checkbox" className="rounded dark:bg-gray-900 dark:border-gray-600" checked={isSelected} onChange={() => onSelectTicket(ticket.id)} /></td>}
@@ -919,98 +961,66 @@ const formatDateForInput = (date) => {
     return d.toISOString().slice(0, 16);
 };
 
+// --- MODIFIED TicketForm ---
 const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
-    const clientList = ['Metlen', 'Amresco', 'Puresky', 'Clean Leaf'];
-    const pureskySites = [
-        'Adirondack - Connecticut River', 'Blossom B - Hamilton Brook', 'Canandaigua', 'Cedar Hill Solar', 'Clayton',
-        'Clover Meadow', 'Cotuit', 'DeKalb I', 'DeKalb II', 'DeKalb III', 'Dover - Buckmaster Pond', 'Dudley Ground Mount (1-3)',
-        'East Brookfield Adams', 'Elmbrook Solar', 'Gouverneur I', 'Gouverneur II', 'Grand Island A', 'Greendale', 'Joe Jenny',
-        'Lake Waconia', 'Mendon Cape Road - Box Pond', 'New Germany', 'Oak Hill Solar 1', 'Oak Hill Solar 2', 'Quiet Meadows 1',
-        'Quiet Meadows 2', 'Tamarac', 'Three Rivers', 'Veseli', 'Volney', 'Wallum', 'Ware - Palmer Road', 'Westport A - Bass River',
-        'White River Solar', 'Zumbro'
-    ];
+    // --- MODIFIED: clientList is now dynamic based on user role ---
+    const clientList = useMemo(() => {
+        if (user.role === 'admin') {
+            return ['Metlen', 'Amresco', 'Puresky', 'Clean Leaf']; // Full list for admins
+        }
+        return user.authorizedClients || []; // Restricted list for users
+    }, [user]);
+
+    const pureskySites = [ 'Adirondack - Connecticut River', 'Blossom B - Hamilton Brook', 'Canandaigua', 'Cedar Hill Solar', 'Clayton', 'Clover Meadow', 'Cotuit', 'DeKalb I', 'DeKalb II', 'DeKalb III', 'Dover - Buckmaster Pond', 'Dudley Ground Mount (1-3)', 'East Brookfield Adams', 'Elmbrook Solar', 'Gouverneur I', 'Gouverneur II', 'Grand Island A', 'Greendale', 'Joe Jenny', 'Lake Waconia', 'Mendon Cape Road - Box Pond', 'New Germany', 'Oak Hill Solar 1', 'Oak Hill Solar 2', 'Quiet Meadows 1', 'Quiet Meadows 2', 'Tamarac', 'Three Rivers', 'Veseli', 'Volney', 'Wallum', 'Ware - Palmer Road', 'Westport A - Bass River', 'White River Solar', 'Zumbro' ];
     const pureskyPlantTypes = ['PV', 'BESS', 'PV+BESS']; 
     const pureskyEquipment = ['All', 'Combiner Box', 'DC-DC Converter', 'HVAC Alarm', 'Inverter', 'Power Manager', 'Recloser', 'String', 'Tracker', 'Weather Station', 'Whole Site'];
     const pureskyEquipmentNumbers = ['All', 'Multiple', ...Array.from({ length: 32 }, (_, i) => `${i + 1}`)];
     const pureskyIssueTypes = ["Cannot confirm Production", "Communication Loss", "Generation Loss", "Derating", "Intermittent Comms", "Grid Voltage Loss"];
 
-    const initialState = { 
-        teamMember: user.name || user.email, 
-        siteName: 'Defford', 
-        status: 'Open', 
-        description: '', 
-        updatedInTeams: 'No', 
-        updatedViaEmail: 'No', 
-        fiixTicket: '', 
-        pcsTicket: '', 
-        sungrowTicket: '', 
-        additionalNotes: '', 
-        clientName: 'Metlen', 
-        priority: 'Medium', 
-        issueStartTime: '', 
-        issueEndTime: '',
-        solarPlantType: 'PV',
-        equipment: 'All',
-        equipmentNumber: 'All',
-        issueType: 'Communication Loss',
-    };
-
+    const initialState = { teamMember: user.name || user.email, siteName: 'Defford', status: 'Open', description: '', updatedInTeams: 'No', updatedViaEmail: 'No', fiixTicket: '', pcsTicket: '', sungrowTicket: '', additionalNotes: '', clientName: 'Metlen', priority: 'Medium', issueStartTime: '', issueEndTime: '', solarPlantType: 'PV', equipment: 'All', equipmentNumber: 'All', issueType: 'Communication Loss' };
     const [formData, setFormData] = useState(initialState);
-    
     const dateConstraints = useMemo(() => {
-        const today = new Date();
-        const tomorrow = new Date();
+        const today = new Date(); const tomorrow = new Date();
         tomorrow.setDate(today.getDate() + 1);
-
         const toLocalISOString = (date) => {
             const pad = (num) => (num < 10 ? '0' : '') + num;
             return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
         }
-        
-        const minDate = toLocalISOString(new Date(today.setHours(0, 0, 0, 0)));
-        const maxDate = toLocalISOString(new Date(tomorrow.setHours(23, 59, 59, 999)));
-
-        return { min: minDate, max: maxDate };
+        return { min: toLocalISOString(new Date(today.setHours(0,0,0,0))), max: toLocalISOString(new Date(tomorrow.setHours(23,59,59,999))) };
     }, []);
     
     useEffect(() => {
         if (ticket) {
-            setFormData({ 
-                ...initialState, 
-                ...ticket,
-                issueStartTime: formatDateForInput(ticket.issueStartTime),
-                issueEndTime: formatDateForInput(ticket.issueEndTime),
-            });
+            setFormData({ ...initialState, ...ticket, issueStartTime: formatDateForInput(ticket.issueStartTime), issueEndTime: formatDateForInput(ticket.issueEndTime), });
         } else {
-            setFormData(initialState);
+             // Set default client to the first available in the list
+            setFormData(prev => ({ ...initialState, clientName: clientList[0] || '' }));
         }
-    }, [ticket, user]);
+    }, [ticket, user, clientList]);
 
     useEffect(() => {
         if (formData.clientName === 'Puresky') {
             setFormData(p => ({ ...p, siteName: pureskySites[0] }));
-        } else {
-            if (!['Defford', 'Whirlbush', 'Cleve Hill'].includes(formData.siteName)) {
-                 setFormData(p => ({ ...p, siteName: 'Defford' }));
-            }
+        } else if (!['Defford', 'Whirlbush', 'Cleve Hill'].includes(formData.siteName)) {
+            setFormData(p => ({ ...p, siteName: 'Defford' }));
         }
     }, [formData.clientName]);
 
-
     const handleChange = (e) => setFormData(p => ({ ...p, [e.target.name]: e.target.value }));
-    
     const handleSubmit = (e) => { 
         e.preventDefault(); 
-        
-        if (formData.status === 'Closed' && !formData.issueEndTime) {
-            showToast('error', 'Please provide a manual "Issue End Time" before closing the issue.');
-            return;
-        }
-        
+        if (formData.status === 'Closed' && !formData.issueEndTime) { showToast('error', 'Please provide a manual "Issue End Time" before closing the issue.'); return; }
         onSave(formData); 
     };
 
     if (!isOpen) return null;
+
+    // --- NEW: Prevent users with no access from creating tickets ---
+    if (clientList.length === 0 && user.role !== 'admin') {
+        onClose(); // Close the form automatically if it was somehow opened
+        showToast('info', 'You must have access to at least one client to create an issue.');
+        return null;
+    }
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 transition-opacity">
@@ -1024,6 +1034,7 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
                                 <div>
                                     <label htmlFor="clientName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Client Name</label>
                                     <select name="clientName" value={formData.clientName} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">
+                                        {/* This now correctly uses the dynamic clientList */}
                                         {clientList.map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                 </div>
@@ -1041,47 +1052,29 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
                             <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-6 border p-4 rounded-lg dark:border-gray-700">
                                 <legend className="text-sm font-medium text-gray-600 dark:text-gray-400 px-2">Issue Details</legend>
                                 <div className="md:col-span-2"><label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label><textarea name="description" rows="3" value={formData.description} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
-                                
                                 <div><label htmlFor="issueStartTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Start Time</label><input type="datetime-local" name="issueStartTime" value={formData.issueStartTime} onChange={handleChange} required min={dateConstraints.min} max={dateConstraints.max} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
                                 <div><label htmlFor="issueEndTime" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue End Time</label><input type="datetime-local" name="issueEndTime" value={formData.issueEndTime} onChange={handleChange} min={dateConstraints.min} max={dateConstraints.max} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"/></div>
-
                                 <div><label htmlFor="teamMember" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Team Member</label><input type="text" name="teamMember" value={formData.teamMember} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm bg-gray-100 dark:bg-gray-600" readOnly /></div>
                                 <div><label htmlFor="priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Priority</label><select name="priority" value={formData.priority} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Low', 'Medium', 'High', 'Urgent'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className={`${(formData.status === 'Closed' && ticket?.closedByName) ? 'col-span-1' : 'col-span-2'}`}><label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label><select name="status" value={formData.status} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{['Open', 'In Progress', 'Closed'].map(o => <option key={o} value={o}>{o}</option>)}</select></div>
                                     {(formData.status === 'Closed' && ticket?.closedByName) && ( <div className="col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Closed By</label><div className="mt-1 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 truncate" title={ticket.closedByName}>{ticket.closedByName}</div></div> )}
                                 </div>
-                                
-                                {/* --- Corrected Conditional Fields --- */}
-
-                                {/* Puresky-specific fields */}
-                                {formData.clientName === 'Puresky' && (
-                                    <>
-                                        <div><label htmlFor="solarPlantType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Solar Plant Type</label><select name="solarPlantType" value={formData.solarPlantType} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyPlantTypes.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                        <div><label htmlFor="issueType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Type</label><select name="issueType" value={formData.issueType} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyIssueTypes.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                    </>
-                                )}
-
-                                {/* Equipment fields for Puresky OR Defford */}
-                                {(formData.clientName === 'Puresky' || formData.siteName === 'Defford') && (
-                                    <>
-                                        <div><label htmlFor="equipment" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment</label><select name="equipment" value={formData.equipment} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipment.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                        <div><label htmlFor="equipmentNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment Number</label><select name="equipmentNumber" value={formData.equipmentNumber} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipmentNumbers.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                                    </>
-                                )}
-                                
-                                {/* Ticket number fields for non-Puresky clients */}
-                                {formData.clientName !== 'Puresky' && (
-                                    <>
-                                        {formData.siteName === 'Defford' 
-                                            ? ( <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> ) 
-                                            : ( <div><label htmlFor="sungrowTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sungrow Ticket</label><input type="text" name="sungrowTicket" value={formData.sungrowTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> )
-                                        }
-                                        <div><label htmlFor="fiixTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fixx Ticket</label><input type="text" name="fiixTicket" value={formData.fiixTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
-                                    </>
-                                )}
-                                
+                                {formData.clientName === 'Puresky' && (<>
+                                    <div><label htmlFor="solarPlantType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Solar Plant Type</label><select name="solarPlantType" value={formData.solarPlantType} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyPlantTypes.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                    <div><label htmlFor="issueType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Type</label><select name="issueType" value={formData.issueType} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyIssueTypes.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                </>)}
+                                {(formData.clientName === 'Puresky' || formData.siteName === 'Defford') && (<>
+                                    <div><label htmlFor="equipment" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment</label><select name="equipment" value={formData.equipment} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipment.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                    <div><label htmlFor="equipmentNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Equipment Number</label><select name="equipmentNumber" value={formData.equipmentNumber} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">{pureskyEquipmentNumbers.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                                </>)}
+                                {formData.clientName !== 'Puresky' && (<>
+                                    {formData.siteName === 'Defford' 
+                                        ? ( <div><label htmlFor="pcsTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">POS Ticket</label><input type="text" name="pcsTicket" value={formData.pcsTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> ) 
+                                        : ( <div><label htmlFor="sungrowTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sungrow Ticket</label><input type="text" name="sungrowTicket" value={formData.sungrowTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div> )
+                                    }
+                                    <div><label htmlFor="fiixTicket" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fixx Ticket</label><input type="text" name="fiixTicket" value={formData.fiixTicket} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white" /></div>
+                                </>)}
                                 <div><label htmlFor="updatedInTeams" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated in Teams</label><select name="updatedInTeams" value={formData.updatedInTeams} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
                                 <div><label htmlFor="updatedViaEmail" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Updated Via Email</label><select name="updatedViaEmail" value={formData.updatedViaEmail} onChange={handleChange} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"><option>Yes</option><option>No</option></select></div>
                                 <div className="md:col-span-2"><label htmlFor="additionalNotes" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Additional Notes</label><textarea name="additionalNotes" rows="3" value={formData.additionalNotes} onChange={handleChange} className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white"></textarea></div>
@@ -1098,38 +1091,18 @@ const TicketForm = ({ isOpen, onClose, onSave, ticket, user, showToast }) => {
 
 const LiveDuration = ({ startTime, endTime }) => {
     const [duration, setDuration] = useState(() => formatDuration(startTime, endTime));
-    
     useEffect(() => {
-        if (endTime) {
-            setDuration(formatDuration(startTime, endTime));
-            return;
-        }
-        const timer = setInterval(() => {
-            setDuration(formatDuration(startTime, null));
-        }, 1000); 
-
+        if (endTime) { setDuration(formatDuration(startTime, endTime)); return; }
+        const timer = setInterval(() => { setDuration(formatDuration(startTime, null)); }, 1000); 
         return () => clearInterval(timer);
     }, [startTime, endTime]);
-
     return <span className="font-mono text-base">{duration}</span>;
 };
 
 
 const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
     if (!isOpen) return null;
-
-    const DetailItem = ({ icon, label, value, children, className = '' }) => (
-        <div className={`flex items-start ${className}`}>
-            <div className="flex-shrink-0 w-6 text-center">
-                {icon && React.createElement(icon, { className: 'w-4 h-4 text-gray-400 dark:text-gray-500 mt-1' })}
-            </div>
-            <div className="ml-2">
-                <p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase tracking-wider">{label}</p>
-                <div className="text-gray-900 dark:text-white text-sm mt-0.5">{children || value || '—'}</div>
-            </div>
-        </div>
-    );
-
+    const DetailItem = ({ icon, label, value, children, className = '' }) => ( <div className={`flex items-start ${className}`}> <div className="flex-shrink-0 w-6 text-center"> {icon && React.createElement(icon, { className: 'w-4 h-4 text-gray-400 dark:text-gray-500 mt-1' })} </div> <div className="ml-2"> <p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase tracking-wider">{label}</p> <div className="text-gray-900 dark:text-white text-sm mt-0.5">{children || value || '—'}</div> </div> </div> );
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 transition-opacity">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col transform transition-all scale-95 opacity-0 animate-fade-in-up">
@@ -1140,9 +1113,7 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                     </div>
                     <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><X className="w-6 h-6" /></button>
                 </div>
-                
                 <div className="p-6 space-y-6 overflow-y-auto">
-                    {/* Core Details Section */}
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2">Core Information</h3>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-4">
@@ -1153,7 +1124,6 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                             {ticket.closedByName && <DetailItem icon={Lock} label="Closed By" value={ticket.closedByName} />}
                         </div>
                     </div>
-                    
                     <div className="space-y-4">
                         <div>
                              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2 mb-2">Issue Description</h3>
@@ -1166,8 +1136,6 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                             </div>
                         )}
                     </div>
-                    
-                     {/* Timestamps Section */}
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2">Timestamps & Duration</h3>
                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-4">
@@ -1179,41 +1147,16 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
                             <DetailItem icon={Clock} label="System Duration"><LiveDuration startTime={ticket.timestamp} endTime={ticket.actualClosedAt} /></DetailItem>
                         </div>
                     </div>
-
-                    {/* Communication & External Tickets */}
                      <div className="space-y-4">
                         <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 border-b dark:border-gray-600 pb-2">Tracking & Communication</h3>
                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-4">
                             <DetailItem icon={Check} label="Updated in Teams" value={ticket.updatedInTeams} />
                             <DetailItem icon={Mail} label="Updated via Email" value={ticket.updatedViaEmail} />
-                            
-                            {/* --- Corrected Conditional Details --- */}
-                            {ticket.clientName === 'Puresky' ? (
-                                <>
-                                    <DetailItem label="Solar Plant Type" value={ticket.solarPlantType} />
-                                    <DetailItem label="Equipment" value={ticket.equipment} />
-                                    <DetailItem label="Equipment Number" value={ticket.equipmentNumber} />
-                                    <DetailItem label="Issue Type" value={ticket.issueType} />
-                                </>
-                            ) : (
-                                <>
-                                    {ticket.siteName === 'Defford' ? (
-                                        <>
-                                            <DetailItem label="POS Ticket #" value={ticket.pcsTicket} />
-                                            <DetailItem label="Equipment" value={ticket.equipment} />
-                                            <DetailItem label="Equipment Number" value={ticket.equipmentNumber} />
-                                        </>
-                                    ) : (
-                                        <DetailItem label="Sungrow Ticket #" value={ticket.sungrowTicket} />
-                                    )}
-                                    <DetailItem label="Fixx Ticket #" value={ticket.fiixTicket} />
-                                </>
-                            )}
+                            {ticket.clientName === 'Puresky' ? ( <> <DetailItem label="Solar Plant Type" value={ticket.solarPlantType} /> <DetailItem label="Equipment" value={ticket.equipment} /> <DetailItem label="Equipment Number" value={ticket.equipmentNumber} /> <DetailItem label="Issue Type" value={ticket.issueType} /> </>
+                            ) : ( <> {ticket.siteName === 'Defford' ? ( <> <DetailItem label="POS Ticket #" value={ticket.pcsTicket} /> <DetailItem label="Equipment" value={ticket.equipment} /> <DetailItem label="Equipment Number" value={ticket.equipmentNumber} /> </> ) : ( <DetailItem label="Sungrow Ticket #" value={ticket.sungrowTicket} /> )} <DetailItem label="Fixx Ticket #" value={ticket.fiixTicket} /> </> )}
                         </div>
                     </div>
-
                 </div>
-
                 <div className="bg-gray-50 dark:bg-gray-900/50 px-6 py-4 flex justify-end rounded-b-xl border-t dark:border-gray-700 mt-auto">
                     <button type="button" onClick={onClose} className="bg-blue-600 text-white py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Close</button>
                 </div>
@@ -1224,29 +1167,14 @@ const TicketDetailModal = ({ isOpen, onClose, ticket }) => {
 };
 
 
-// --- Remaining components (CloseConfirmationModal, DeleteConfirmationModal, etc.) ---
-// --- These are unchanged but included for completeness. ---
-
 const CloseConfirmationModal = ({ isOpen, onClose, onConfirm, ticket }) => {
-    const [password, setPassword] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
-
+    const [password, setPassword] = useState(''); const [isLoading, setIsLoading] = useState(false); const [error, setError] = useState('');
     const handleSubmit = async (e) => {
-        e.preventDefault();
-        setIsLoading(true);
-        setError('');
-        try {
-            await onConfirm(password);
-        } catch (e) {
-            setError(e.message.includes('wrong-password') ? 'Incorrect password. Please try again.' : 'An error occurred.');
-        } finally {
-            setIsLoading(false);
-        }
+        e.preventDefault(); setIsLoading(true); setError('');
+        try { await onConfirm(password); } catch (e) { setError(e.message.includes('wrong-password') ? 'Incorrect password. Please try again.' : 'An error occurred.'); } 
+        finally { setIsLoading(false); }
     };
-
     if (!isOpen) return null;
-
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 transition-opacity">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md transform transition-all scale-95 opacity-0 animate-fade-in-up">
@@ -1255,9 +1183,7 @@ const CloseConfirmationModal = ({ isOpen, onClose, onConfirm, ticket }) => {
                         <div className="text-center">
                             <Lock className="mx-auto h-12 w-12 text-blue-500" />
                             <h3 className="mt-2 text-lg font-medium text-gray-900 dark:text-white">Confirm Close Issue</h3>
-                            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                                You are about to close the issue for client: <span className="font-semibold">{ticket?.clientName}</span>.
-                            </p>
+                            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">You are about to close the issue for client: <span className="font-semibold">{ticket?.clientName}</span>.</p>
                             <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">Please enter your password to confirm this action.</p>
                         </div>
                         <div className="mt-4">
@@ -1280,25 +1206,13 @@ const CloseConfirmationModal = ({ isOpen, onClose, onConfirm, ticket }) => {
 };
 
 const DeleteConfirmationModal = ({ isOpen, onClose, onConfirm, count, isPermanent }) => {
-    const [password, setPassword] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
-
+    const [password, setPassword] = useState(''); const [isLoading, setIsLoading] = useState(false); const [error, setError] = useState('');
     const handleSubmit = async (e) => {
-        e.preventDefault();
-        setIsLoading(true);
-        setError('');
-        try {
-            await onConfirm(password);
-        } catch (e) {
-            setError(e.message);
-        } finally {
-            setIsLoading(false);
-        }
+        e.preventDefault(); setIsLoading(true); setError('');
+        try { await onConfirm(password); } catch (e) { setError(e.message); } 
+        finally { setIsLoading(false); }
     };
-
     if (!isOpen) return null;
-
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 transition-opacity">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md transform transition-all scale-95 opacity-0 animate-fade-in-up">
@@ -1354,21 +1268,15 @@ const ProfilePage = ({ user, auth, db, showToast }) => {
     const [phone, setPhone] = useState(user.phone || '');
     const [employeeId, setEmployeeId] = useState(user.employeeId || '');
     const [isSaving, setIsSaving] = useState(false);
-
     const handleProfileUpdate = async (e) => {
-        e.preventDefault();
-        setIsSaving(true);
+        e.preventDefault(); setIsSaving(true);
         try {
             await updateProfile(auth.currentUser, { displayName: name });
             const userDocRef = doc(db, `/artifacts/${appId}/public/data/users`, user.uid);
             await updateDoc(userDocRef, { name, phone, employeeId });
             showToast('success', 'Profile updated successfully!');
-        } catch (error) {
-            console.error("Error updating profile:", error);
-            showToast('error', 'Failed to update profile.');
-        } finally {
-            setIsSaving(false);
-        }
+        } catch (error) { console.error("Error updating profile:", error); showToast('error', 'Failed to update profile.'); } 
+        finally { setIsSaving(false); }
     };
     
     return (
@@ -1399,6 +1307,63 @@ const ProfilePage = ({ user, auth, db, showToast }) => {
                     </div>
                 </form>
             </div>
+        </div>
+    );
+};
+
+// --- NEW AccessRequestModal Component ---
+const AccessRequestModal = ({ isOpen, onClose, user, onSubmit }) => {
+    const allClients = ['Metlen', 'Amresco', 'Puresky', 'Clean Leaf']; // Master list of clients
+    const [selectedClient, setSelectedClient] = useState(allClients[0]);
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsLoading(true);
+        await onSubmit(selectedClient);
+        setIsLoading(false);
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 transition-opacity">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md transform transition-all scale-95 opacity-0 animate-fade-in-up">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                        <div className="text-center">
+                            <Lock className="mx-auto h-12 w-12 text-blue-500" />
+                            <h3 className="mt-2 text-lg font-medium text-gray-900 dark:text-white">Request Client Access</h3>
+                            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                                To view, create, or edit issues, you must request access to a client workspace. An administrator will review your request.
+                            </p>
+                        </div>
+                        <div className="mt-4 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Your Name</label>
+                                <input type="text" value={user.name || ''} disabled className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm bg-gray-100 dark:bg-gray-700 dark:text-gray-400" />
+                            </div>
+                             <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Your Email</label>
+                                <input type="email" value={user.email} disabled className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm bg-gray-100 dark:bg-gray-700 dark:text-gray-400" />
+                            </div>
+                            <div>
+                                <label htmlFor="client-request" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Select Client to Request</label>
+                                <select id="client-request" value={selectedClient} onChange={(e) => setSelectedClient(e.target.value)} required className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 dark:text-white">
+                                    {allClients.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-900/50 px-6 py-3 flex justify-end space-x-3 rounded-b-xl">
+                        <button type="button" onClick={onClose} className="bg-white dark:bg-gray-700 py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600">Cancel</button>
+                        <button type="submit" disabled={isLoading} className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-300">
+                            {isLoading ? 'Submitting...' : 'Submit Request'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <style>{`@keyframes fade-in-up { from { opacity: 0; transform: scale(0.95) translateY(20px); } to { opacity: 1; transform: scale(1) translateY(0); } } .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }`}</style>
         </div>
     );
 };
